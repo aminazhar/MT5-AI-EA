@@ -51,6 +51,45 @@ void OnTimer()
             candle.close,
             candle.tick_volume
          );
+
+         FibonacciLevels levels;
+         if(Fibonacci_Calculate(candle, signal.direction, levels))
+         {
+            PrintFormat(
+               "[MT5-AI] Fibonacci: VOID=%G BO=%G TP=%G TP E4-E7=%G E3=%G E3.5=%G E4=%G",
+               levels.void_level,
+               levels.bo,
+               levels.tp,
+               levels.tp_e4_e7,
+               levels.e3,
+               levels.e3_5,
+               levels.e4
+            );
+
+            PrintFormat(
+               "[MT5-AI] Fibonacci: E4.5=%G E5=%G E5.5=%G E6=%G E6.5=%G E7=%G E7.5=%G",
+               levels.e4_5,
+               levels.e5,
+               levels.e5_5,
+               levels.e6,
+               levels.e6_5,
+               levels.e7,
+               levels.e7_5
+            );
+
+            PrintFormat(
+               "[MT5-AI] Fibonacci: E8=%G E8.5=%G E9=%G E9.5=%G E10=%G",
+               levels.e8,
+               levels.e8_5,
+               levels.e9,
+               levels.e9_5,
+               levels.e10
+            );
+         }
+         else
+         {
+            Print("[MT5-AI] Fibonacci calculation failed");
+         }
       }
       else
       {
