@@ -37,7 +37,9 @@ def parse_signal(message: str) -> Signal | None:
     if symbol_match is None or timestamp_match is None:
         return None
 
-    symbol = symbol_match.group("symbol").strip()
+    # Telegram messages end the symbol line with sentence punctuation.
+    # That punctuation is not part of the MT5 symbol name.
+    symbol = symbol_match.group("symbol").strip().rstrip(".,;:!?")
     if not symbol:
         return None
 

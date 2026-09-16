@@ -5,15 +5,25 @@
 #include "SignalReader.mqh"
 #include "Constants.mqh"
 
-bool ChartDrawer_SetFibonacciLevel(const string object_name, const int index, const double ratio, const string label)
+bool ChartDrawer_SetFibonacciLevel(
+   const string object_name,
+   const int index,
+   const double ratio,
+   const string label
+)
 {
    return(
       ObjectSetDouble(0, object_name, OBJPROP_LEVELVALUE, index, ratio) &&
-      ObjectSetString(0, object_name, OBJPROP_LEVELTEXT, index, label)
+      ObjectSetString(0, object_name, OBJPROP_LEVELTEXT, index, label) &&
+      ObjectSetInteger(0, object_name, OBJPROP_LEVELCOLOR, index, clrBlack)
    );
 }
 
-bool ChartDrawer_DrawFibonacci(const string object_name, const Candle &candle, const SignalDirection direction)
+bool ChartDrawer_DrawFibonacci(
+   const string object_name,
+   const Candle &candle,
+   const SignalDirection direction
+)
 {
    if(object_name == "" || candle.time == 0 || candle.high <= candle.low)
       return(false);
@@ -21,12 +31,12 @@ bool ChartDrawer_DrawFibonacci(const string object_name, const Candle &candle, c
    if(direction != SIGNAL_DIRECTION_BUY && direction != SIGNAL_DIRECTION_SELL)
       return(false);
 
-   if(ObjectFind(0, object_name) >= 0 && !ObjectDelete(0, object_name))
-      return(false);
+   if(ObjectFind(0, object_name) >= 0)
+      ObjectDelete(0, object_name);
 
-   const datetime second_anchor_time = candle.time + PeriodSeconds(PERIOD_M1);
-   const double first_anchor_price = direction == SIGNAL_DIRECTION_BUY ? candle.high : candle.low;
-   const double second_anchor_price = direction == SIGNAL_DIRECTION_BUY ? candle.low : candle.high;
+   datetime second_anchor_time = candle.time + PeriodSeconds(PERIOD_M1);
+   double first_anchor_price = direction == SIGNAL_DIRECTION_BUY ? candle.high : candle.low;
+   double second_anchor_price = direction == SIGNAL_DIRECTION_BUY ? candle.low : candle.high;
 
    if(!ObjectCreate(
       0,
@@ -41,7 +51,8 @@ bool ChartDrawer_DrawFibonacci(const string object_name, const Candle &candle, c
       return(false);
 
    if(!ObjectSetInteger(0, object_name, OBJPROP_LEVELS, FIBONACCI_LEVEL_COUNT) ||
-      !ObjectSetInteger(0, object_name, OBJPROP_RAY_RIGHT, true))
+      !ObjectSetInteger(0, object_name, OBJPROP_RAY_RIGHT, true) ||
+      !ObjectSetInteger(0, object_name, OBJPROP_COLOR, clrBlack))
    {
       ObjectDelete(0, object_name);
       return(false);
@@ -75,9 +86,18 @@ bool ChartDrawer_DrawFibonacci(const string object_name, const Candle &candle, c
    return(true);
 }
 
-bool ChartDrawer_DrawFibonacci(const Candle &candle, const SignalDirection direction)
+bool ChartDrawer_DrawFibonacci(
+   const Candle &candle,
+   const SignalDirection direction
+)
 {
-   return(ChartDrawer_DrawFibonacci(FIBONACCI_OBJECT_NAME, candle, direction));
+   return(
+      ChartDrawer_DrawFibonacci(
+         FIBONACCI_OBJECT_NAME,
+         candle,
+         direction
+      )
+   );
 }
 
 bool ChartDrawer_RemoveFibonacci(const string object_name)
