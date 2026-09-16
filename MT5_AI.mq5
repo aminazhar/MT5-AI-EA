@@ -11,6 +11,7 @@
 #include "include/RangeFilter.mqh"
 #include "include/BreakoutDetector.mqh"
 #include "include/PendingOrderPlanner.mqh"
+#include "include/TradeExecutor.mqh"
 #include "include/Utils.mqh"
 
 int OnInit()
@@ -124,6 +125,10 @@ void OnTimer()
                PendingOrderPlan plan;
                if(PendingOrderPlanner_Create(signal.direction, levels, classification, breakout, plan))
                {
+                  plan.symbol = signal.symbol;
+                  plan.volume = InpOrderVolume;
+                  plan.magic_number = InpMagicNumber;
+
                   PrintFormat("[MT5-AI] Pending order plan: Count=%d", plan.count);
 
                   for(int index = 0; index < plan.count; index++)
@@ -137,6 +142,32 @@ void OnTimer()
                         order_type,
                         plan.entries[index].price
                      );
+                  }
+
+                  TradeExecutionResult execution;
+                  if(TradeExecutor_Execute(plan, execution))
+                  {
+                     for(int index = 0; index < execution.count; index++)
+                     {
+                        string execution_order_type = execution.results[index].type == PENDING_ORDER_BUY_STOP ? "BUY STOP" :
+                                                      execution.results[index].type == PENDING_ORDER_BUY_LIMIT ? "BUY LIMIT" :
+                                                      execution.results[index].type == PENDING_ORDER_SELL_STOP ? "SELL STOP" : "SELL LIMIT";
+                        string execution_status = execution.results[index].status == EXECUTION_STATUS_PLACED ? "PLACED" :
+                                                  execution.results[index].status == EXECUTION_STATUS_FAILED ? "FAILED" : "NOT ATTEMPTED";
+
+                        PrintFormat(
+                           "[MT5-AI] Execution: Type=%s Price=%G Status=%s Retcode=%u Ticket=%I64u",
+                           execution_order_type,
+                           execution.results[index].price,
+                           execution_status,
+                           execution.results[index].retcode,
+                           execution.results[index].ticket
+                        );
+                     }
+                  }
+                  else
+                  {
+                     Print("[MT5-AI] Trade execution plan is invalid");
                   }
                }
                else

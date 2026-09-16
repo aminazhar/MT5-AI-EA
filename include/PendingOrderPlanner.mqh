@@ -23,12 +23,18 @@ struct PendingOrderEntry
 
 struct PendingOrderPlan
 {
+   string            symbol;
+   double            volume;
+   ulong             magic_number;
    PendingOrderEntry entries[6];
    int               count;
 };
 
 void PendingOrderPlanner_Reset(PendingOrderPlan &plan)
 {
+   plan.symbol = "";
+   plan.volume = 0.0;
+   plan.magic_number = 0;
    plan.count = 0;
 }
 
