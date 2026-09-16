@@ -1,119 +1,116 @@
-#ifndef MT5_AI_CHART_DRAWER_MQH
-#define MT5_AI_CHART_DRAWER_MQH
+#property copyright "MT5-AI-EA"
+#property version   "1.0"
+#property strict
 
-#include "CandleFinder.mqh"
-#include "SignalReader.mqh"
-#include "Constants.mqh"
+#include "include/Config.mqh"
+#include "include/Constants.mqh"
+#include "include/SignalReader.mqh"
+#include "include/CandleFinder.mqh"
+#include "include/Fibonacci.mqh"
+#include "include/SignalVerification.mqh"
+#include "include/ChartDrawer.mqh"
+#include "include/RangeFilter.mqh"
+#include "include/MultiSignalFibonacciManager.mqh"
+#include "include/Utils.mqh"
 
-bool ChartDrawer_SetFibonacciLevel(
-   const string object_name,
-   const int index,
-   const double ratio,
-   const string label
-)
+int OnInit()
 {
-   return(
-      ObjectSetDouble(0, object_name, OBJPROP_LEVELVALUE, index, ratio) &&
-      ObjectSetString(0, object_name, OBJPROP_LEVELTEXT, index, label) &&
-      ObjectSetInteger(0, object_name, OBJPROP_LEVELCOLOR, index, clrBlack)
+   SignalSetupManager_Initialize();
+   EventSetTimer(TIMER_INTERVAL_SECONDS);
+   Print("[MT5-AI] EA-13 multi-signal Fibonacci manager initialized (visual-only)");
+
+   return(INIT_SUCCEEDED);
+}
+
+void OnDeinit(const int reason)
+{
+   EventKillTimer();
+   Print("[MT5-AI] EA Stopped");
+}
+
+void PrintVerification(const VerificationResult &verification)
+{
+   PrintFormat("[MT5-AI] Signal Verification: %s", verification.signal_valid ? "PASS" : "FAIL");
+   PrintFormat("[MT5-AI] Candle Verification: %s", verification.candle_valid ? "PASS" : "FAIL");
+   PrintFormat("[MT5-AI] Fibonacci Verification: %s", verification.fibonacci_valid ? "PASS" : "FAIL");
+   PrintFormat("[MT5-AI] Orientation Verification: %s", verification.orientation_valid ? "PASS" : "FAIL");
+   PrintFormat("[MT5-AI] Overall Verification: %s", verification.verification_passed ? "PASS" : "FAIL");
+}
+
+void PrintFibonacci(const FibonacciLevels &levels)
+{
+   PrintFormat(
+      "[MT5-AI] Fibonacci: VOID=%G BO=%G TP=%G TP E4-E7=%G E3=%G E3.5=%G E4=%G",
+      levels.void_level,
+      levels.bo,
+      levels.tp,
+      levels.tp_e4_e7,
+      levels.e3,
+      levels.e3_5,
+      levels.e4
    );
 }
 
+bool PrepareNewSignal(const Signal &signal)
 {
-   return(
-      ObjectSetDouble(0, object_name, OBJPROP_LEVELVALUE, index, ratio) &&
-      ObjectSetString(0, object_name, OBJPROP_LEVELTEXT, index, label)
+   if(SignalSetupManager_Find(signal.symbol, signal.timestamp) >= 0)
+      return(true);
+
+   PrintFormat(
+      "[MT5-AI] Signal: Symbol=%s Time=%s",
+      signal.symbol,
+      TimeToString(signal.timestamp, TIME_DATE | TIME_SECONDS)
    );
-}
 
-bool ChartDrawer_DrawFibonacci(
-   const string object_name,
-   const Candle &candle,
-   const SignalDirection direction
-)
-{
-   if(object_name == "" || candle.time == 0 || candle.high <= candle.low)
-      return(false);
-
-   if(direction != SIGNAL_DIRECTION_BUY && direction != SIGNAL_DIRECTION_SELL)
-      return(false);
-
-   if(ObjectFind(0, object_name) >= 0 && !ObjectDelete(0, object_name))
-      return(false);
-
-   datetime second_anchor_time = candle.time + PeriodSeconds(PERIOD_M1);
-   double first_anchor_price = direction == SIGNAL_DIRECTION_BUY ? candle.high : candle.low;
-   double second_anchor_price = direction == SIGNAL_DIRECTION_BUY ? candle.low : candle.high;
-
-   if(!ObjectCreate(
-      0,
-      object_name,
-      OBJ_FIBO,
-      0,
-      candle.time,
-      first_anchor_price,
-      second_anchor_time,
-      second_anchor_price
-   ))
-      return(false);
-
-   if(!ObjectSetInteger(0, object_name, OBJPROP_LEVELS, FIBONACCI_LEVEL_COUNT) ||
-      !ObjectSetInteger(0, object_name, OBJPROP_RAY_RIGHT, true) ||
-      !ObjectSetInteger(0, object_name, OBJPROP_COLOR, clrBlack))
+   Candle candle;
+   if(!CandleFinder_FindM1(signal.symbol, signal.timestamp, candle))
    {
-      ObjectDelete(0, object_name);
+      Print("[MT5-AI] M1 candle not found");
       return(false);
    }
 
-   if(!ChartDrawer_SetFibonacciLevel(object_name, 0, FIBONACCI_RATIO_VOID, "VOID") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 1, FIBONACCI_RATIO_BO, "BO") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 2, FIBONACCI_RATIO_TP, "TP") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 3, FIBONACCI_RATIO_TP_E4_E7, "TP E4-E7") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 4, FIBONACCI_RATIO_E3, "E3") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 5, FIBONACCI_RATIO_E3_5, "E3.5") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 6, FIBONACCI_RATIO_E4, "E4") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 7, FIBONACCI_RATIO_E4_5, "E4.5") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 8, FIBONACCI_RATIO_E5, "E5") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 9, FIBONACCI_RATIO_E5_5, "E5.5") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 10, FIBONACCI_RATIO_E6, "E6") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 11, FIBONACCI_RATIO_E6_5, "E6.5") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 12, FIBONACCI_RATIO_E7, "E7") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 13, FIBONACCI_RATIO_E7_5, "E7.5") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 14, FIBONACCI_RATIO_E8, "E8") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 15, FIBONACCI_RATIO_E8_5, "E8.5") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 16, FIBONACCI_RATIO_E9, "E9") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 17, FIBONACCI_RATIO_E9_5, "E9.5") ||
-      !ChartDrawer_SetFibonacciLevel(object_name, 18, FIBONACCI_RATIO_E10, "E10"))
+   FibonacciLevels levels;
+   if(!Fibonacci_Calculate(candle, SIGNAL_DIRECTION_BUY, levels))
    {
-      ObjectDelete(0, object_name);
+      Print("[MT5-AI] Fibonacci calculation failed");
       return(false);
    }
 
-   ChartRedraw(0);
+   VerificationResult verification;
+   SignalVerification_Verify(signal, candle, levels, SIGNAL_DIRECTION_BUY, verification);
+   PrintVerification(verification);
+   PrintFibonacci(levels);
+
+   double range;
+   RangeClassification classification;
+   if(RangeFilter_Classify(levels, range, classification))
+      PrintFormat("[MT5-AI] Range: Value=%G", range);
+   else
+      Print("[MT5-AI] Range classification failed");
+
+   if(!SignalSetupManager_Add(signal, candle, levels, SIGNAL_DIRECTION_BUY))
+   {
+      Print("[MT5-AI] Fibonacci drawing failed");
+      return(false);
+   }
+
+   Print("[MT5-AI] Initial BUY Fibonacci drawn; execution remains disabled");
    return(true);
 }
 
-bool ChartDrawer_DrawFibonacci(
-   const Candle &candle,
-   const SignalDirection direction
-)
+void OnTimer()
 {
-   return(ChartDrawer_DrawFibonacci(
-      FIBONACCI_OBJECT_NAME,
-      candle,
-      direction
-   ));
+   Signal signal;
+
+   if(SignalReader_Read(signal))
+      PrepareNewSignal(signal);
+
+   SignalSetupManager_MonitorAll();
 }
 
-bool ChartDrawer_RemoveFibonacci(const string object_name)
+void OnTick()
 {
-   if(object_name == "")
-      return(false);
-
-   if(ObjectFind(0, object_name) < 0)
-      return(true);
-
-   return(ObjectDelete(0, object_name));
+   // Catch level touches immediately on the chart symbol; the timer continues
+   // to monitor setups on every tracked symbol.
+   SignalSetupManager_MonitorAll();
 }
-
-#endif

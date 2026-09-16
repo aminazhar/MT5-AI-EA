@@ -52,7 +52,9 @@ bool ChartDrawer_DrawFibonacci(
 
    if(!ObjectSetInteger(0, object_name, OBJPROP_LEVELS, FIBONACCI_LEVEL_COUNT) ||
       !ObjectSetInteger(0, object_name, OBJPROP_RAY_RIGHT, true) ||
-      !ObjectSetInteger(0, object_name, OBJPROP_COLOR, clrBlack))
+      !ObjectSetInteger(0, object_name, OBJPROP_COLOR, clrBlack) ||
+      !ObjectSetInteger(0, object_name, OBJPROP_SELECTABLE, true) ||
+      !ObjectSetInteger(0, object_name, OBJPROP_HIDDEN, false))
    {
       ObjectDelete(0, object_name);
       return(false);
