@@ -2,6 +2,10 @@
 #define MT5_AI_CONSTANTS_MQH
 
 const int TIMER_INTERVAL_SECONDS = 1;
+const string FIBONACCI_OBJECT_NAME = "MT5_AI_FIBONACCI";
+const int FIBONACCI_LEVEL_COUNT = 19;
+const double RANGE_REJECT_THRESHOLD = 35000.0;
+const double RANGE_WIDE_THRESHOLD = 45000.0;
 
 const double FIBONACCI_RATIO_VOID       = 4.23;
 const double FIBONACCI_RATIO_BO         = 2.618;
