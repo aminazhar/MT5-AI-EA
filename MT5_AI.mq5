@@ -9,6 +9,7 @@
 #include "include/Fibonacci.mqh"
 #include "include/ChartDrawer.mqh"
 #include "include/RangeFilter.mqh"
+#include "include/BreakoutDetector.mqh"
 #include "include/Utils.mqh"
 
 int OnInit()
@@ -103,6 +104,25 @@ void OnTimer()
             else
             {
                Print("[MT5-AI] Range classification failed");
+            }
+
+            BreakoutResult breakout;
+            if(BreakoutDetector_CheckBid(signal.symbol, levels, breakout))
+            {
+               string breakout_type = breakout.type == BREAKOUT_BUY ? "BUY" :
+                                      breakout.type == BREAKOUT_SELL ? "SELL" : "NONE";
+               string reversal_required = breakout.fibonacci_reversal_required ? "YES" : "NO";
+
+               PrintFormat(
+                  "[MT5-AI] Breakout: Bid=%G Type=%s FibonacciReversalRequired=%s",
+                  breakout.bid,
+                  breakout_type,
+                  reversal_required
+               );
+            }
+            else
+            {
+               Print("[MT5-AI] Breakout detection failed");
             }
 
             if(!ChartDrawer_DrawFibonacci(candle, signal.direction))
