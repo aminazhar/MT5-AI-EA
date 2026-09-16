@@ -5,14 +5,21 @@ from typing import Final
 from models import Signal
 
 
+INDICATOR_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\bNQ426\b",
+    re.IGNORECASE,
+)
+
 SYMBOL_MARKER: Final[str] = "\U0001F449"
 SYMBOL_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^\s*" + SYMBOL_MARKER + r"\s*(?P<symbol>[^\r\n]+?)\s*$",
     re.MULTILINE,
 )
+
 TIMESTAMP_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"C\.S\.T\s*:\s*(?P<timestamp>\d{4}\.\d{2}\.\d{2}\s+\d{2}:\d{2})"
 )
+
 TIMESTAMP_FORMAT: Final[str] = "%Y.%m.%d %H:%M"
 
 
@@ -20,8 +27,13 @@ def parse_signal(message: str) -> Signal | None:
     if not isinstance(message, str):
         return None
 
+    # Accept only NQ426 signals
+    if not INDICATOR_PATTERN.search(message):
+        return None
+
     symbol_match = SYMBOL_PATTERN.search(message)
     timestamp_match = TIMESTAMP_PATTERN.search(message)
+
     if symbol_match is None or timestamp_match is None:
         return None
 
@@ -31,9 +43,13 @@ def parse_signal(message: str) -> Signal | None:
 
     try:
         timestamp = datetime.strptime(
-            timestamp_match.group("timestamp"), TIMESTAMP_FORMAT
+            timestamp_match.group("timestamp"),
+            TIMESTAMP_FORMAT,
         )
     except ValueError:
         return None
 
-    return Signal(symbol=symbol, timestamp=timestamp)
+    return Signal(
+        symbol=symbol,
+        timestamp=timestamp,
+    )
