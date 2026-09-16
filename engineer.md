@@ -128,3 +128,18 @@ EA:
 - Performance optimization
 
 These belong to future milestones.
+
+
+## Development Principle
+
+Do not implement multiple strategy features in a single sprint.
+
+Each sprint should introduce only one new responsibility.
+
+Every sprint must compile successfully before moving to the next.
+
+## Dependencies
+
+Prefer stable, well-maintained libraries over custom implementations when they reduce maintenance cost.
+
+Avoid reinventing common infrastructure such as JSON parsing unless there is a clear project-specific reason.
