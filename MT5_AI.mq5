@@ -11,6 +11,7 @@
 #include "include/ChartDrawer.mqh"
 #include "include/RangeFilter.mqh"
 #include "include/BreakoutDetector.mqh"
+#include "include/FibonacciReversal.mqh"
 #include "include/PendingOrderPlanner.mqh"
 #include "include/TradeExecutor.mqh"
 #include "include/BasketManager.mqh"
@@ -61,6 +62,9 @@ void OnTimer()
          FibonacciLevels levels;
          if(Fibonacci_Calculate(candle, signal.direction, levels))
          {
+             if(breakout.type != BREAKOUT_SELL && !ChartDrawer_DrawFibonacci(candle, signal.direction))
+               Print("[MT5-AI] Fibonacci drawing failed");
+               
             VerificationResult verification;
             SignalVerification_Verify(signal, candle, levels, signal.direction, verification);
 
@@ -122,6 +126,12 @@ void OnTimer()
             BreakoutResult breakout;
             if(BreakoutDetector_CheckBid(signal.symbol, levels, breakout))
             {
+               FibonacciReversalResult reversal;
+               bool reversal_successful = FibonacciReversal_Apply(signal, candle, breakout, reversal);
+
+               if(reversal_successful && reversal.reversal_performed)
+                  levels = reversal.levels;
+
                string breakout_type = breakout.type == BREAKOUT_BUY ? "BUY" :
                                       breakout.type == BREAKOUT_SELL ? "SELL" : "NONE";
                string reversal_required = breakout.fibonacci_reversal_required ? "YES" : "NO";
@@ -133,17 +143,24 @@ void OnTimer()
                   reversal_required
                );
 
-               PendingOrderPlan plan;
-               if(PendingOrderPlanner_Create(signal.direction, levels, classification, breakout, plan))
+               PrintFormat("[MT5-AI] Reversal Triggered: %s", reversal.reversal_performed ? "YES" : "NO");
+               PrintFormat("[MT5-AI] Fibonacci Recalculated: %s", reversal.reversal_performed ? "YES" : "NO");
+               PrintFormat("[MT5-AI] Chart Redrawn: %s", reversal.redraw_successful ? "YES" : "NO");
+               PrintFormat("[MT5-AI] Fibonacci Reversal Overall: %s", reversal_successful ? "PASS" : "FAIL");
+
+               if(reversal_successful)
                {
-                  plan.symbol = signal.symbol;
-                  plan.volume = InpOrderVolume;
-                  plan.magic_number = InpMagicNumber;
-
-                  PrintFormat("[MT5-AI] Pending order plan: Count=%d", plan.count);
-
-                  for(int index = 0; index < plan.count; index++)
+                  PendingOrderPlan plan;
+                  if(PendingOrderPlanner_Create(signal.direction, levels, classification, breakout, plan))
                   {
+                     plan.symbol = signal.symbol;
+                     plan.volume = InpOrderVolume;
+                     plan.magic_number = InpMagicNumber;
+
+                     PrintFormat("[MT5-AI] Pending order plan: Count=%d", plan.count);
+
+                     for(int index = 0; index < plan.count; index++)
+                     {
                      string order_type = plan.entries[index].type == PENDING_ORDER_BUY_STOP ? "BUY STOP" :
                                          plan.entries[index].type == PENDING_ORDER_BUY_LIMIT ? "BUY LIMIT" :
                                          plan.entries[index].type == PENDING_ORDER_SELL_STOP ? "SELL STOP" : "SELL LIMIT";
@@ -153,13 +170,13 @@ void OnTimer()
                         order_type,
                         plan.entries[index].price
                      );
-                  }
+                     }
 
-                  TradeExecutionResult execution;
-                  if(TradeExecutor_Execute(plan, execution))
-                  {
-                     for(int index = 0; index < execution.count; index++)
+                     TradeExecutionResult execution;
+                     if(TradeExecutor_Execute(plan, execution))
                      {
+                        for(int index = 0; index < execution.count; index++)
+                        {
                         string execution_order_type = execution.results[index].type == PENDING_ORDER_BUY_STOP ? "BUY STOP" :
                                                       execution.results[index].type == PENDING_ORDER_BUY_LIMIT ? "BUY LIMIT" :
                                                       execution.results[index].type == PENDING_ORDER_SELL_STOP ? "SELL STOP" : "SELL LIMIT";
@@ -174,11 +191,11 @@ void OnTimer()
                            execution.results[index].retcode,
                            execution.results[index].ticket
                         );
-                     }
+                        }
 
-                     BasketConfiguration basket;
-                     if(BasketManager_Create(levels, plan, execution, basket))
-                     {
+                        BasketConfiguration basket;
+                        if(BasketManager_Create(levels, plan, execution, basket))
+                        {
                         string basket_direction = basket.direction == BASKET_DIRECTION_BUY ? "BUY" :
                                                   basket.direction == BASKET_DIRECTION_SELL ? "SELL" : "NONE";
 
@@ -190,22 +207,23 @@ void OnTimer()
                            basket.take_profit_e4_e7
                         );
 
-                        for(int index = 0; index < basket.placed_order_count; index++)
-                           PrintFormat("[MT5-AI] Basket ticket: %I64u", basket.tickets[index]);
+                           for(int index = 0; index < basket.placed_order_count; index++)
+                              PrintFormat("[MT5-AI] Basket ticket: %I64u", basket.tickets[index]);
+                        }
+                        else
+                        {
+                           Print("[MT5-AI] Basket configuration failed");
+                        }
                      }
                      else
                      {
-                        Print("[MT5-AI] Basket configuration failed");
+                        Print("[MT5-AI] Trade execution plan is invalid");
                      }
                   }
                   else
                   {
-                     Print("[MT5-AI] Trade execution plan is invalid");
+                     Print("[MT5-AI] Pending order planning failed");
                   }
-               }
-               else
-               {
-                  Print("[MT5-AI] Pending order planning failed");
                }
             }
             else
@@ -213,8 +231,7 @@ void OnTimer()
                Print("[MT5-AI] Breakout detection failed");
             }
 
-            if(!ChartDrawer_DrawFibonacci(candle, signal.direction))
-               Print("[MT5-AI] Fibonacci drawing failed");
+           
          }
          else
          {
