@@ -1,0 +1,122 @@
+#ifndef MT5_AI_PENDING_ORDER_PLANNER_MQH
+#define MT5_AI_PENDING_ORDER_PLANNER_MQH
+
+#include "SignalReader.mqh"
+#include "Fibonacci.mqh"
+#include "RangeFilter.mqh"
+#include "BreakoutDetector.mqh"
+#include "Constants.mqh"
+
+enum PendingOrderType
+{
+   PENDING_ORDER_BUY_STOP,
+   PENDING_ORDER_BUY_LIMIT,
+   PENDING_ORDER_SELL_STOP,
+   PENDING_ORDER_SELL_LIMIT
+};
+
+struct PendingOrderEntry
+{
+   PendingOrderType type;
+   double           price;
+};
+
+struct PendingOrderPlan
+{
+   PendingOrderEntry entries[6];
+   int               count;
+};
+
+void PendingOrderPlanner_Reset(PendingOrderPlan &plan)
+{
+   plan.count = 0;
+}
+
+bool PendingOrderPlanner_Add(PendingOrderPlan &plan, const PendingOrderType type, const double price)
+{
+   if(plan.count >= MAX_PENDING_ORDERS || !MathIsValidNumber(price))
+      return(false);
+
+   plan.entries[plan.count].type = type;
+   plan.entries[plan.count].price = price;
+   plan.count++;
+
+   return(true);
+}
+
+bool PendingOrderPlanner_Create(
+   const SignalDirection direction,
+   const FibonacciLevels &levels,
+   const RangeClassification classification,
+   const BreakoutResult &breakout,
+   PendingOrderPlan &plan
+)
+{
+   PendingOrderPlanner_Reset(plan);
+
+   if(direction != SIGNAL_DIRECTION_BUY && direction != SIGNAL_DIRECTION_SELL)
+      return(false);
+
+   if(classification != RANGE_CLASSIFICATION_REJECT &&
+      classification != RANGE_CLASSIFICATION_NORMAL &&
+      classification != RANGE_CLASSIFICATION_WIDE)
+      return(false);
+
+   if(breakout.type != BREAKOUT_NONE &&
+      breakout.type != BREAKOUT_BUY &&
+      breakout.type != BREAKOUT_SELL)
+      return(false);
+
+   if(classification == RANGE_CLASSIFICATION_REJECT || breakout.type == BREAKOUT_NONE)
+      return(true);
+
+   if(breakout.type == BREAKOUT_SELL && breakout.fibonacci_reversal_required)
+      return(false);
+
+   if((breakout.type == BREAKOUT_BUY && direction != SIGNAL_DIRECTION_BUY) ||
+      (breakout.type == BREAKOUT_SELL && direction != SIGNAL_DIRECTION_SELL))
+      return(false);
+
+   if(classification == RANGE_CLASSIFICATION_NORMAL)
+   {
+      if(breakout.type == BREAKOUT_BUY)
+      {
+         return(
+            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_STOP, levels.bo) &&
+            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e3) &&
+            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e4) &&
+            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e5)
+         );
+      }
+
+      return(
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_STOP, levels.bo) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e3) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e4) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e5)
+      );
+   }
+
+   if(breakout.type == BREAKOUT_BUY)
+   {
+      return(
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e5) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e6) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e7) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e8) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e9) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e10)
+      );
+   }
+
+   return(
+      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e5) &&
+      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e6) &&
+      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e7) &&
+      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e8) &&
+      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e9) &&
+      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e10)
+   );
+}
+
+#endif
