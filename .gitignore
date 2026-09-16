@@ -1,0 +1,9 @@
+# MetaTrader compiled output
+*.ex5
+*.ex4
+
+# Logs
+*.log
+
+# MetaEditor temp
+*.tmp
