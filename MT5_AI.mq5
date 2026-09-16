@@ -26,17 +26,35 @@ void OnDeinit(const int reason)
 
 void OnTimer()
 {
-   Print("[MT5-AI] Timer Tick");
-
    Signal signal;
 
    if(SignalReader_Read(signal))
    {
+      string direction_text = signal.direction == SIGNAL_DIRECTION_BUY ? "BUY" : "SELL";
+
       PrintFormat(
-         "[MT5-AI] Signal: Symbol=%s Direction=%d Time=%s",
+         "[MT5-AI] Signal: Symbol=%s Direction=%s Time=%s",
          signal.symbol,
-         signal.direction,
+         direction_text,
          TimeToString(signal.timestamp, TIME_DATE | TIME_SECONDS)
       );
+
+      Candle candle;
+      if(CandleFinder_FindM1(signal.symbol, signal.timestamp, candle))
+      {
+         PrintFormat(
+            "[MT5-AI] Candle: Time=%s Open=%G High=%G Low=%G Close=%G TickVolume=%I64d",
+            TimeToString(candle.time, TIME_DATE | TIME_SECONDS),
+            candle.open,
+            candle.high,
+            candle.low,
+            candle.close,
+            candle.tick_volume
+         );
+      }
+      else
+      {
+         Print("[MT5-AI] M1 candle not found");
+      }
    }
 }
