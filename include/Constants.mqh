@@ -1,0 +1,6 @@
+#ifndef MT5_AI_CONSTANTS_MQH
+#define MT5_AI_CONSTANTS_MQH
+
+const int TIMER_INTERVAL_SECONDS = 1;
+
+#endif
