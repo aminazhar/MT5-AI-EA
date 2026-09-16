@@ -2,7 +2,7 @@ import re
 from datetime import datetime
 from typing import Final
 
-from .models import Signal
+from models import Signal
 
 
 SYMBOL_MARKER: Final[str] = "\U0001F449"
