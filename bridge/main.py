@@ -4,8 +4,9 @@ from datetime import datetime
 from telethon import TelegramClient, events
 
 from config import ConfigurationError, Settings, load_settings
-from .models import Signal
-from .parser import parse_signal
+from models import Signal
+from parser import parse_signal
+from writer import write_signal
 
 
 SESSION_NAME = "telegram_listener"
@@ -48,6 +49,19 @@ def print_signal(signal: Signal | None) -> None:
     print(f"Timestamp : {signal.timestamp:%Y-%m-%d %H:%M:%S}")
 
 
+def print_write_result(output_path: str, write_successful: bool) -> None:
+    print("----------------------------------------")
+
+    if write_successful:
+        print("Signal written")
+        print("----------------------------------------")
+        print(f"Path : {output_path}")
+        return
+
+    print("Signal write failed")
+    print("----------------------------------------")
+
+
 async def listen(settings: Settings) -> None:
     while True:
         client = TelegramClient(SESSION_NAME, settings.api_id, settings.api_hash)
@@ -59,7 +73,15 @@ async def listen(settings: Settings) -> None:
             @client.on(events.NewMessage(chats=channel))
             async def handle_new_message(event):
                 print_message(settings.channel_name, event.message.date, event.raw_text)
-                print_signal(parse_signal(event.raw_text))
+                signal = parse_signal(event.raw_text)
+                print_signal(signal)
+
+                if signal is not None:
+                    print_write_result(
+                        settings.signal_output_path,
+                        write_signal(signal, settings.signal_output_path),
+                    )
+
                 print()
 
             print(f"Listening for new messages in: {settings.channel_name}")

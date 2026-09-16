@@ -14,6 +14,7 @@ class Settings:
     api_hash: str
     phone_number: str
     channel_name: str
+    signal_output_path: str
 
 
 def _required_environment_variable(name: str) -> str:
@@ -37,4 +38,5 @@ def load_settings() -> Settings:
         api_hash=_required_environment_variable("API_HASH"),
         phone_number=_required_environment_variable("PHONE_NUMBER"),
         channel_name=_required_environment_variable("CHANNEL_NAME"),
+        signal_output_path=_required_environment_variable("SIGNAL_OUTPUT_PATH"),
     )

@@ -1,6 +1,6 @@
-# Bridge-1 Telegram Listener
+# Bridge Telegram Listener, Parser, and Signal Writer
 
-This listener connects to one Telegram channel and prints each new message to the console. It does not parse messages, write JSON, or communicate with MetaTrader 5.
+This bridge connects to one Telegram channel, prints each new message, parses supported signals, and writes valid signals to `signal.json`. It does not communicate with MetaTrader 5 directly.
 
 ## Prerequisites
 
@@ -32,9 +32,26 @@ API_ID=123456
 API_HASH=your_api_hash
 PHONE_NUMBER=+1234567890
 CHANNEL_NAME=Project V || SIGNAL
+SIGNAL_OUTPUT_PATH=C:\Users\<username>\AppData\Roaming\MetaQuotes\Terminal\<terminal-id>\MQL5\Files\signal.json
 ```
 
 `CHANNEL_NAME` must exactly match the Telegram channel name shown in your dialogs.
+
+`SIGNAL_OUTPUT_PATH` must be the complete path, including the `signal.json` filename, inside the MT5 terminal's `MQL5/Files` folder.
+
+## Locate the MT5 `MQL5/Files` folder
+
+1. Open MetaTrader 5.
+2. Select **File** > **Open Data Folder**.
+3. Open `MQL5`.
+4. Open `Files`.
+5. Copy the complete path and append `signal.json`.
+
+Example:
+
+```env
+SIGNAL_OUTPUT_PATH=C:\Users\<username>\AppData\Roaming\MetaQuotes\Terminal\<terminal-id>\MQL5\Files\signal.json
+```
 
 ## First login
 
