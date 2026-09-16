@@ -42,20 +42,21 @@ def print_signal(signal: Signal | None) -> None:
     print("----------------------------------------")
 
     if signal is None:
-        print("Invalid signal")
+        print("Message ignored: not NQ426 / invalid signal")
+        print("----------------------------------------")
         return
 
+    print("Valid NQ426 signal detected")
     print(f"Symbol    : {signal.symbol}")
     print(f"Timestamp : {signal.timestamp:%Y-%m-%d %H:%M:%S}")
+    print("----------------------------------------")
 
 
 def print_write_result(output_path: str, write_successful: bool) -> None:
-    print("----------------------------------------")
-
     if write_successful:
-        print("Signal written")
-        print("----------------------------------------")
+        print("Signal write success")
         print(f"Path : {output_path}")
+        print("----------------------------------------")
         return
 
     print("Signal write failed")
@@ -73,20 +74,20 @@ async def listen(settings: Settings) -> None:
             @client.on(events.NewMessage(chats=channel))
             async def handle_new_message(event):
                 print_message(settings.channel_name, event.message.date, event.raw_text)
+
                 signal = parse_signal(event.raw_text)
                 print_signal(signal)
 
                 if signal is not None:
-                    print_write_result(
-                        settings.signal_output_path,
-                        write_signal(signal, settings.signal_output_path),
-                    )
+                    write_successful = write_signal(signal, settings.signal_output_path)
+                    print_write_result(settings.signal_output_path, write_successful)
 
                 print()
 
             print(f"Listening for new messages in: {settings.channel_name}")
             await client.run_until_disconnected()
             print("Telegram disconnected. Reconnecting...")
+
         except asyncio.CancelledError:
             raise
         except Exception as error:
