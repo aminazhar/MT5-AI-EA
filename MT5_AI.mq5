@@ -7,6 +7,7 @@
 #include "include/SignalReader.mqh"
 #include "include/CandleFinder.mqh"
 #include "include/Fibonacci.mqh"
+#include "include/SignalVerification.mqh"
 #include "include/ChartDrawer.mqh"
 #include "include/RangeFilter.mqh"
 #include "include/BreakoutDetector.mqh"
@@ -60,6 +61,15 @@ void OnTimer()
          FibonacciLevels levels;
          if(Fibonacci_Calculate(candle, signal.direction, levels))
          {
+            VerificationResult verification;
+            SignalVerification_Verify(signal, candle, levels, signal.direction, verification);
+
+            PrintFormat("[MT5-AI] Signal Verification: %s", verification.signal_valid ? "PASS" : "FAIL");
+            PrintFormat("[MT5-AI] Candle Verification: %s", verification.candle_valid ? "PASS" : "FAIL");
+            PrintFormat("[MT5-AI] Fibonacci Verification: %s", verification.fibonacci_valid ? "PASS" : "FAIL");
+            PrintFormat("[MT5-AI] Orientation Verification: %s", verification.orientation_valid ? "PASS" : "FAIL");
+            PrintFormat("[MT5-AI] Overall Verification: %s", verification.verification_passed ? "PASS" : "FAIL");
+
             PrintFormat(
                "[MT5-AI] Fibonacci: VOID=%G BO=%G TP=%G TP E4-E7=%G E3=%G E3.5=%G E4=%G",
                levels.void_level,
