@@ -103,7 +103,6 @@ bool SignalVerification_Verify(
    result.signal_valid =
       signal.symbol != "" &&
       signal.timestamp > 0 &&
-      signal.direction == direction &&
       (direction == SIGNAL_DIRECTION_BUY || direction == SIGNAL_DIRECTION_SELL);
 
    result.candle_valid =
@@ -114,7 +113,6 @@ bool SignalVerification_Verify(
 
    if(result.candle_valid &&
       candle.high > candle.low &&
-      (direction == SIGNAL_DIRECTION_BUY || direction == SIGNAL_DIRECTION_SELL) &&
       SignalVerification_LevelsAreValid(levels))
    {
       const double range = candle.high - candle.low;
@@ -124,13 +122,15 @@ bool SignalVerification_Verify(
       result.fibonacci_valid = SignalVerification_LevelsMatchFormula(levels, anchor, range, orientation);
 
       if(direction == SIGNAL_DIRECTION_BUY)
-         result.orientation_valid = SignalVerification_AreEqual(levels.e3, candle.high) &&
-                                    levels.bo > levels.e3 &&
-                                    levels.e4 < levels.e3;
+         result.orientation_valid =
+            SignalVerification_AreEqual(levels.e3, candle.high) &&
+            levels.bo > levels.e3 &&
+            levels.e4 < levels.e3;
       else
-         result.orientation_valid = SignalVerification_AreEqual(levels.e3, candle.low) &&
-                                    levels.bo < levels.e3 &&
-                                    levels.e4 > levels.e3;
+         result.orientation_valid =
+            SignalVerification_AreEqual(levels.e3, candle.low) &&
+            levels.bo < levels.e3 &&
+            levels.e4 > levels.e3;
    }
 
    result.verification_passed =
