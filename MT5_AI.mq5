@@ -27,5 +27,16 @@ void OnDeinit(const int reason)
 void OnTimer()
 {
    Print("[MT5-AI] Timer Tick");
-   SignalReader_OnTimer();
+
+   Signal signal;
+
+   if(SignalReader_Read(signal))
+   {
+      PrintFormat(
+         "[MT5-AI] Signal: Symbol=%s Direction=%d Time=%s",
+         signal.symbol,
+         signal.direction,
+         TimeToString(signal.timestamp, TIME_DATE | TIME_SECONDS)
+      );
+   }
 }
