@@ -10,20 +10,14 @@
 #include "include/SignalVerification.mqh"
 #include "include/ChartDrawer.mqh"
 #include "include/RangeFilter.mqh"
-#include "include/BreakoutDetector.mqh"
-#include "include/FibonacciReversal.mqh"
+#include "include/MultiSignalFibonacciManager.mqh"
 #include "include/Utils.mqh"
-
-string          g_active_symbol = "";
-datetime        g_active_timestamp = 0;
-SignalDirection g_active_direction = SIGNAL_DIRECTION_UNKNOWN;
-Candle          g_active_candle;
-FibonacciLevels g_active_levels;
 
 int OnInit()
 {
+   SignalSetupManager_Initialize();
    EventSetTimer(TIMER_INTERVAL_SECONDS);
-   Print("[MT5-AI] EA Initialized");
+   Print("[MT5-AI] EA-13 multi-signal Fibonacci manager initialized (visual-only)");
 
    return(INIT_SUCCEEDED);
 }
@@ -32,11 +26,6 @@ void OnDeinit(const int reason)
 {
    EventKillTimer();
    Print("[MT5-AI] EA Stopped");
-}
-
-bool IsNewSignal(const Signal &signal)
-{
-   return(signal.symbol != g_active_symbol || signal.timestamp != g_active_timestamp);
 }
 
 void PrintVerification(const VerificationResult &verification)
@@ -60,30 +49,13 @@ void PrintFibonacci(const FibonacciLevels &levels)
       levels.e3_5,
       levels.e4
    );
-
-   PrintFormat(
-      "[MT5-AI] Fibonacci: E4.5=%G E5=%G E5.5=%G E6=%G E6.5=%G E7=%G E7.5=%G",
-      levels.e4_5,
-      levels.e5,
-      levels.e5_5,
-      levels.e6,
-      levels.e6_5,
-      levels.e7,
-      levels.e7_5
-   );
-
-   PrintFormat(
-      "[MT5-AI] Fibonacci: E8=%G E8.5=%G E9=%G E9.5=%G E10=%G",
-      levels.e8,
-      levels.e8_5,
-      levels.e9,
-      levels.e9_5,
-      levels.e10
-   );
 }
 
 bool PrepareNewSignal(const Signal &signal)
 {
+   if(SignalSetupManager_Find(signal.symbol, signal.timestamp) >= 0)
+      return(true);
+
    PrintFormat(
       "[MT5-AI] Signal: Symbol=%s Time=%s",
       signal.symbol,
@@ -97,26 +69,10 @@ bool PrepareNewSignal(const Signal &signal)
       return(false);
    }
 
-   PrintFormat(
-      "[MT5-AI] Candle: Time=%s Open=%G High=%G Low=%G Close=%G TickVolume=%I64d",
-      TimeToString(candle.time, TIME_DATE | TIME_SECONDS),
-      candle.open,
-      candle.high,
-      candle.low,
-      candle.close,
-      candle.tick_volume
-   );
-
    FibonacciLevels levels;
    if(!Fibonacci_Calculate(candle, SIGNAL_DIRECTION_BUY, levels))
    {
       Print("[MT5-AI] Fibonacci calculation failed");
-      return(false);
-   }
-
-   if(!ChartDrawer_DrawFibonacci(candle, SIGNAL_DIRECTION_BUY))
-   {
-      Print("[MT5-AI] Fibonacci drawing failed");
       return(false);
    }
 
@@ -128,97 +84,26 @@ bool PrepareNewSignal(const Signal &signal)
    double range;
    RangeClassification classification;
    if(RangeFilter_Classify(levels, range, classification))
-   {
-      string classification_name = classification == RANGE_CLASSIFICATION_REJECT ? "REJECT" :
-                                   classification == RANGE_CLASSIFICATION_NORMAL ? "NORMAL" : "WIDE";
-
-      PrintFormat(
-         "[MT5-AI] Range: Value=%G Classification=%s",
-         range,
-         classification_name
-      );
-   }
+      PrintFormat("[MT5-AI] Range: Value=%G", range);
    else
-   {
       Print("[MT5-AI] Range classification failed");
+
+   if(!SignalSetupManager_Add(signal, candle, levels, SIGNAL_DIRECTION_BUY))
+   {
+      Print("[MT5-AI] Fibonacci drawing failed");
+      return(false);
    }
 
-   g_active_symbol = signal.symbol;
-   g_active_timestamp = signal.timestamp;
-   g_active_direction = SIGNAL_DIRECTION_BUY;
-   g_active_candle = candle;
-   g_active_levels = levels;
-
-   Print("[MT5-AI] Initial BUY Fibonacci drawn");
-
+   Print("[MT5-AI] Initial BUY Fibonacci drawn; execution remains disabled");
    return(true);
-}
-
-void MonitorBreakout(const Signal &signal)
-{
-   if(g_active_symbol == "" || g_active_timestamp == 0)
-      return;
-
-   BreakoutResult breakout;
-   if(!BreakoutDetector_CheckBid(g_active_symbol, g_active_levels, breakout))
-   {
-      Print("[MT5-AI] Breakout detection failed");
-      return;
-   }
-
-   if(breakout.type == BREAKOUT_NONE)
-      return;
-
-   string breakout_type = breakout.type == BREAKOUT_BUY ? "BUY" :
-                          breakout.type == BREAKOUT_SELL ? "SELL" : "NONE";
-
-   PrintFormat(
-      "[MT5-AI] Breakout: Bid=%G Type=%s FibonacciReversalRequired=%s",
-      breakout.bid,
-      breakout_type,
-      breakout.fibonacci_reversal_required ? "YES" : "NO"
-   );
-
-   if(breakout.type == BREAKOUT_BUY)
-      return;
-
-   if(g_active_direction == SIGNAL_DIRECTION_SELL)
-      return;
-
-   FibonacciReversalResult reversal;
-   bool reversal_successful = FibonacciReversal_Apply(signal, g_active_candle, breakout, reversal);
-
-   PrintFormat("[MT5-AI] Reversal Triggered: %s", reversal.reversal_performed ? "YES" : "NO");
-   PrintFormat("[MT5-AI] Fibonacci Recalculated: %s", reversal.reversal_performed ? "YES" : "NO");
-   PrintFormat("[MT5-AI] Chart Redrawn: %s", reversal.redraw_successful ? "YES" : "NO");
-   PrintFormat("[MT5-AI] Fibonacci Reversal Overall: %s", reversal_successful ? "PASS" : "FAIL");
-
-   if(reversal_successful && reversal.reversal_performed)
-   {
-      g_active_levels = reversal.levels;
-      g_active_direction = SIGNAL_DIRECTION_SELL;
-
-      VerificationResult verification;
-      SignalVerification_Verify(signal, g_active_candle, g_active_levels, SIGNAL_DIRECTION_SELL, verification);
-      PrintVerification(verification);
-      PrintFibonacci(g_active_levels);
-
-      Print("[MT5-AI] SELL Fibonacci drawn");
-   }
 }
 
 void OnTimer()
 {
    Signal signal;
 
-   if(!SignalReader_Read(signal))
-      return;
+   if(SignalReader_Read(signal))
+      PrepareNewSignal(signal);
 
-   if(IsNewSignal(signal))
-   {
-      if(!PrepareNewSignal(signal))
-         return;
-   }
-
-   MonitorBreakout(signal);
+   SignalSetupManager_MonitorAll();
 }

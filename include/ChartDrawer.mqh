@@ -5,23 +5,23 @@
 #include "SignalReader.mqh"
 #include "Constants.mqh"
 
-bool ChartDrawer_SetFibonacciLevel(const int index, const double ratio, const string label)
+bool ChartDrawer_SetFibonacciLevel(const string object_name, const int index, const double ratio, const string label)
 {
    return(
-      ObjectSetDouble(0, FIBONACCI_OBJECT_NAME, OBJPROP_LEVELVALUE, index, ratio) &&
-      ObjectSetString(0, FIBONACCI_OBJECT_NAME, OBJPROP_LEVELTEXT, index, label)
+      ObjectSetDouble(0, object_name, OBJPROP_LEVELVALUE, index, ratio) &&
+      ObjectSetString(0, object_name, OBJPROP_LEVELTEXT, index, label)
    );
 }
 
-bool ChartDrawer_DrawFibonacci(const Candle &candle, const SignalDirection direction)
+bool ChartDrawer_DrawFibonacci(const string object_name, const Candle &candle, const SignalDirection direction)
 {
-   if(candle.time == 0 || candle.high <= candle.low)
+   if(object_name == "" || candle.time == 0 || candle.high <= candle.low)
       return(false);
 
    if(direction != SIGNAL_DIRECTION_BUY && direction != SIGNAL_DIRECTION_SELL)
       return(false);
 
-   if(ObjectFind(0, FIBONACCI_OBJECT_NAME) >= 0 && !ObjectDelete(0, FIBONACCI_OBJECT_NAME))
+   if(ObjectFind(0, object_name) >= 0 && !ObjectDelete(0, object_name))
       return(false);
 
    const datetime second_anchor_time = candle.time + PeriodSeconds(PERIOD_M1);
@@ -30,7 +30,7 @@ bool ChartDrawer_DrawFibonacci(const Candle &candle, const SignalDirection direc
 
    if(!ObjectCreate(
       0,
-      FIBONACCI_OBJECT_NAME,
+      object_name,
       OBJ_FIBO,
       0,
       candle.time,
@@ -40,39 +40,55 @@ bool ChartDrawer_DrawFibonacci(const Candle &candle, const SignalDirection direc
    ))
       return(false);
 
-   if(!ObjectSetInteger(0, FIBONACCI_OBJECT_NAME, OBJPROP_LEVELS, FIBONACCI_LEVEL_COUNT) ||
-      !ObjectSetInteger(0, FIBONACCI_OBJECT_NAME, OBJPROP_RAY_RIGHT, true))
+   if(!ObjectSetInteger(0, object_name, OBJPROP_LEVELS, FIBONACCI_LEVEL_COUNT) ||
+      !ObjectSetInteger(0, object_name, OBJPROP_RAY_RIGHT, true))
    {
-      ObjectDelete(0, FIBONACCI_OBJECT_NAME);
+      ObjectDelete(0, object_name);
       return(false);
    }
 
-   if(!ChartDrawer_SetFibonacciLevel(0, FIBONACCI_RATIO_VOID, "VOID") ||
-      !ChartDrawer_SetFibonacciLevel(1, FIBONACCI_RATIO_BO, "BO") ||
-      !ChartDrawer_SetFibonacciLevel(2, FIBONACCI_RATIO_TP, "TP") ||
-      !ChartDrawer_SetFibonacciLevel(3, FIBONACCI_RATIO_TP_E4_E7, "TP E4-E7") ||
-      !ChartDrawer_SetFibonacciLevel(4, FIBONACCI_RATIO_E3, "E3") ||
-      !ChartDrawer_SetFibonacciLevel(5, FIBONACCI_RATIO_E3_5, "E3.5") ||
-      !ChartDrawer_SetFibonacciLevel(6, FIBONACCI_RATIO_E4, "E4") ||
-      !ChartDrawer_SetFibonacciLevel(7, FIBONACCI_RATIO_E4_5, "E4.5") ||
-      !ChartDrawer_SetFibonacciLevel(8, FIBONACCI_RATIO_E5, "E5") ||
-      !ChartDrawer_SetFibonacciLevel(9, FIBONACCI_RATIO_E5_5, "E5.5") ||
-      !ChartDrawer_SetFibonacciLevel(10, FIBONACCI_RATIO_E6, "E6") ||
-      !ChartDrawer_SetFibonacciLevel(11, FIBONACCI_RATIO_E6_5, "E6.5") ||
-      !ChartDrawer_SetFibonacciLevel(12, FIBONACCI_RATIO_E7, "E7") ||
-      !ChartDrawer_SetFibonacciLevel(13, FIBONACCI_RATIO_E7_5, "E7.5") ||
-      !ChartDrawer_SetFibonacciLevel(14, FIBONACCI_RATIO_E8, "E8") ||
-      !ChartDrawer_SetFibonacciLevel(15, FIBONACCI_RATIO_E8_5, "E8.5") ||
-      !ChartDrawer_SetFibonacciLevel(16, FIBONACCI_RATIO_E9, "E9") ||
-      !ChartDrawer_SetFibonacciLevel(17, FIBONACCI_RATIO_E9_5, "E9.5") ||
-      !ChartDrawer_SetFibonacciLevel(18, FIBONACCI_RATIO_E10, "E10"))
+   if(!ChartDrawer_SetFibonacciLevel(object_name, 0, FIBONACCI_RATIO_VOID, "VOID") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 1, FIBONACCI_RATIO_BO, "BO") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 2, FIBONACCI_RATIO_TP, "TP") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 3, FIBONACCI_RATIO_TP_E4_E7, "TP E4-E7") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 4, FIBONACCI_RATIO_E3, "E3") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 5, FIBONACCI_RATIO_E3_5, "E3.5") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 6, FIBONACCI_RATIO_E4, "E4") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 7, FIBONACCI_RATIO_E4_5, "E4.5") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 8, FIBONACCI_RATIO_E5, "E5") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 9, FIBONACCI_RATIO_E5_5, "E5.5") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 10, FIBONACCI_RATIO_E6, "E6") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 11, FIBONACCI_RATIO_E6_5, "E6.5") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 12, FIBONACCI_RATIO_E7, "E7") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 13, FIBONACCI_RATIO_E7_5, "E7.5") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 14, FIBONACCI_RATIO_E8, "E8") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 15, FIBONACCI_RATIO_E8_5, "E8.5") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 16, FIBONACCI_RATIO_E9, "E9") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 17, FIBONACCI_RATIO_E9_5, "E9.5") ||
+      !ChartDrawer_SetFibonacciLevel(object_name, 18, FIBONACCI_RATIO_E10, "E10"))
    {
-      ObjectDelete(0, FIBONACCI_OBJECT_NAME);
+      ObjectDelete(0, object_name);
       return(false);
    }
 
    ChartRedraw(0);
    return(true);
+}
+
+bool ChartDrawer_DrawFibonacci(const Candle &candle, const SignalDirection direction)
+{
+   return(ChartDrawer_DrawFibonacci(FIBONACCI_OBJECT_NAME, candle, direction));
+}
+
+bool ChartDrawer_RemoveFibonacci(const string object_name)
+{
+   if(object_name == "")
+      return(false);
+
+   if(ObjectFind(0, object_name) < 0)
+      return(true);
+
+   return(ObjectDelete(0, object_name));
 }
 
 #endif
