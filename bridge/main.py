@@ -4,6 +4,8 @@ from datetime import datetime
 from telethon import TelegramClient, events
 
 from config import ConfigurationError, Settings, load_settings
+from .models import Signal
+from .parser import parse_signal
 
 
 SESSION_NAME = "telegram_listener"
@@ -34,6 +36,18 @@ def print_message(channel_name: str, message_time: datetime, message_text: str) 
     print("----------------------------------------")
 
 
+def print_signal(signal: Signal | None) -> None:
+    print("Signal")
+    print("----------------------------------------")
+
+    if signal is None:
+        print("Invalid signal")
+        return
+
+    print(f"Symbol    : {signal.symbol}")
+    print(f"Timestamp : {signal.timestamp:%Y-%m-%d %H:%M:%S}")
+
+
 async def listen(settings: Settings) -> None:
     while True:
         client = TelegramClient(SESSION_NAME, settings.api_id, settings.api_hash)
@@ -45,6 +59,8 @@ async def listen(settings: Settings) -> None:
             @client.on(events.NewMessage(chats=channel))
             async def handle_new_message(event):
                 print_message(settings.channel_name, event.message.date, event.raw_text)
+                print_signal(parse_signal(event.raw_text))
+                print()
 
             print(f"Listening for new messages in: {settings.channel_name}")
             await client.run_until_disconnected()
