@@ -12,6 +12,7 @@
 #include "include/BreakoutDetector.mqh"
 #include "include/PendingOrderPlanner.mqh"
 #include "include/TradeExecutor.mqh"
+#include "include/BasketManager.mqh"
 #include "include/Utils.mqh"
 
 int OnInit()
@@ -163,6 +164,28 @@ void OnTimer()
                            execution.results[index].retcode,
                            execution.results[index].ticket
                         );
+                     }
+
+                     BasketConfiguration basket;
+                     if(BasketManager_Create(levels, plan, execution, basket))
+                     {
+                        string basket_direction = basket.direction == BASKET_DIRECTION_BUY ? "BUY" :
+                                                  basket.direction == BASKET_DIRECTION_SELL ? "SELL" : "NONE";
+
+                        PrintFormat(
+                           "[MT5-AI] Basket: Direction=%s PlacedOrderCount=%d TP=%G TP E4-E7=%G",
+                           basket_direction,
+                           basket.placed_order_count,
+                           basket.take_profit,
+                           basket.take_profit_e4_e7
+                        );
+
+                        for(int index = 0; index < basket.placed_order_count; index++)
+                           PrintFormat("[MT5-AI] Basket ticket: %I64u", basket.tickets[index]);
+                     }
+                     else
+                     {
+                        Print("[MT5-AI] Basket configuration failed");
                      }
                   }
                   else
