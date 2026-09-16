@@ -10,6 +10,7 @@
 #include "include/ChartDrawer.mqh"
 #include "include/RangeFilter.mqh"
 #include "include/BreakoutDetector.mqh"
+#include "include/PendingOrderPlanner.mqh"
 #include "include/Utils.mqh"
 
 int OnInit()
@@ -119,6 +120,29 @@ void OnTimer()
                   breakout_type,
                   reversal_required
                );
+
+               PendingOrderPlan plan;
+               if(PendingOrderPlanner_Create(signal.direction, levels, classification, breakout, plan))
+               {
+                  PrintFormat("[MT5-AI] Pending order plan: Count=%d", plan.count);
+
+                  for(int index = 0; index < plan.count; index++)
+                  {
+                     string order_type = plan.entries[index].type == PENDING_ORDER_BUY_STOP ? "BUY STOP" :
+                                         plan.entries[index].type == PENDING_ORDER_BUY_LIMIT ? "BUY LIMIT" :
+                                         plan.entries[index].type == PENDING_ORDER_SELL_STOP ? "SELL STOP" : "SELL LIMIT";
+
+                     PrintFormat(
+                        "[MT5-AI] Pending order: Type=%s Price=%G",
+                        order_type,
+                        plan.entries[index].price
+                     );
+                  }
+               }
+               else
+               {
+                  Print("[MT5-AI] Pending order planning failed");
+               }
             }
             else
             {
