@@ -12,9 +12,8 @@ enum SignalDirection
 
 struct Signal
 {
-   string          symbol;
-   SignalDirection direction;
-   datetime        timestamp;
+   string   symbol;
+   datetime timestamp;
 };
 
 bool SignalReader_IsWhitespace(const ushort character)
@@ -35,15 +34,19 @@ bool SignalReader_ExtractString(const string json, const string key, string &val
 
    int value_start = colon_position + 1;
    int json_length = StringLen(json);
-   while(value_start < json_length && SignalReader_IsWhitespace((ushort)StringGetCharacter(json, value_start)))
+
+   while(value_start < json_length &&
+         SignalReader_IsWhitespace((ushort)StringGetCharacter(json, value_start)))
       value_start++;
 
    if(value_start >= json_length || StringGetCharacter(json, value_start) != '"')
       return(false);
 
    value_start++;
+
    int value_end = value_start;
-   while(value_end < json_length && StringGetCharacter(json, value_end) != '"')
+   while(value_end < json_length &&
+         StringGetCharacter(json, value_end) != '"')
       value_end++;
 
    if(value_end >= json_length)
@@ -58,8 +61,7 @@ bool SignalReader_ExtractString(const string json, const string key, string &val
 
 void SignalReader_Reset(Signal &signal)
 {
-   signal.symbol    = "";
-   signal.direction = SIGNAL_DIRECTION_UNKNOWN;
+   signal.symbol = "";
    signal.timestamp = 0;
 }
 
@@ -72,36 +74,25 @@ bool SignalReader_Read(Signal &signal)
       return(false);
 
    string json = "";
+
    while(!FileIsEnding(file_handle))
       json += FileReadString(file_handle);
 
    FileClose(file_handle);
 
    string symbol;
-   string direction_text;
    string timestamp_text;
 
    if(!SignalReader_ExtractString(json, "symbol", symbol) ||
-      !SignalReader_ExtractString(json, "direction", direction_text) ||
       !SignalReader_ExtractString(json, "timestamp", timestamp_text))
       return(false);
 
-   StringToUpper(direction_text);
-
    datetime timestamp = StringToTime(timestamp_text);
+
    if(symbol == "" || timestamp == 0)
       return(false);
 
-   SignalDirection direction;
-   if(direction_text == "BUY")
-      direction = SIGNAL_DIRECTION_BUY;
-   else if(direction_text == "SELL")
-      direction = SIGNAL_DIRECTION_SELL;
-   else
-      return(false);
-
-   signal.symbol    = symbol;
-   signal.direction = direction;
+   signal.symbol = symbol;
    signal.timestamp = timestamp;
 
    return(true);

@@ -41,12 +41,13 @@ bool FibonacciReversal_Apply(
 {
    FibonacciReversal_Reset(result);
 
-   if(signal.symbol == "" || signal.timestamp <= 0 ||
-      (signal.direction != SIGNAL_DIRECTION_BUY && signal.direction != SIGNAL_DIRECTION_SELL))
+   if(signal.symbol == "" || signal.timestamp <= 0)
       return(false);
 
-   if(candle.time != signal.timestamp || !MathIsValidNumber(candle.high) ||
-      !MathIsValidNumber(candle.low) || candle.high <= candle.low)
+   if(candle.time != signal.timestamp ||
+      !MathIsValidNumber(candle.high) ||
+      !MathIsValidNumber(candle.low) ||
+      candle.high <= candle.low)
       return(false);
 
    if(!FibonacciReversal_IsBreakoutValid(breakout))
