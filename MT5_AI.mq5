@@ -8,6 +8,7 @@
 #include "include/CandleFinder.mqh"
 #include "include/Fibonacci.mqh"
 #include "include/ChartDrawer.mqh"
+#include "include/RangeFilter.mqh"
 #include "include/Utils.mqh"
 
 int OnInit()
@@ -85,6 +86,27 @@ void OnTimer()
                levels.e9_5,
                levels.e10
             );
+
+            double range;
+            RangeClassification classification;
+            if(RangeFilter_Classify(levels, range, classification))
+            {
+               string classification_name = classification == RANGE_CLASSIFICATION_REJECT ? "REJECT" :
+                                            classification == RANGE_CLASSIFICATION_NORMAL ? "NORMAL" : "WIDE";
+
+               PrintFormat(
+                  "[MT5-AI] Range: Value=%G Classification=%s",
+                  range,
+                  classification_name
+               );
+            }
+            else
+            {
+               Print("[MT5-AI] Range classification failed");
+            }
+
+            if(!ChartDrawer_DrawFibonacci(candle, signal.direction))
+               Print("[MT5-AI] Fibonacci drawing failed");
          }
          else
          {
