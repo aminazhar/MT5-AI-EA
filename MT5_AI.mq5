@@ -13,6 +13,28 @@
 #include "include/MultiSignalFibonacciManager.mqh"
 #include "include/Utils.mqh"
 
+string g_last_range_rejected_signal_key = "";
+
+string SignalKey(const Signal &signal)
+{
+   return(signal.symbol + "_" + IntegerToString((long)signal.timestamp));
+}
+
+void NotifyRangeClassification(const RangeClassification classification, const double range_points)
+{
+   string message;
+
+   if(classification == RANGE_CLASSIFICATION_REJECT)
+      message = StringFormat("[MT5-AI] %.0f points: below 35k range - could be a trap. Fibonacci not drawn.", range_points);
+   else if(classification == RANGE_CLASSIFICATION_NORMAL)
+      message = StringFormat("[MT5-AI] %.0f points: within 35k-45k range - can proceed to trade.", range_points);
+   else
+      message = StringFormat("[MT5-AI] %.0f points: exceeds 45k normal range - proceed with caution.", range_points);
+
+   Print(message);
+   Alert(message);
+}
+
 int OnInit()
 {
    SignalSetupManager_Initialize();
@@ -81,12 +103,30 @@ bool PrepareNewSignal(const Signal &signal)
    PrintVerification(verification);
    PrintFibonacci(levels);
 
-   double range;
+   double range_points;
    RangeClassification classification;
-   if(RangeFilter_Classify(levels, range, classification))
-      PrintFormat("[MT5-AI] Range: Value=%G", range);
-   else
+   if(!RangeFilter_Classify(levels, signal.symbol, range_points, classification))
+   {
       Print("[MT5-AI] Range classification failed");
+      return(false);
+   }
+
+   PrintFormat("[MT5-AI] Range: Points=%.0f", range_points);
+
+   string signal_key = SignalKey(signal);
+   if(classification == RANGE_CLASSIFICATION_REJECT)
+   {
+      // signal.json remains unchanged after rejection, so alert only once per signal.
+      if(g_last_range_rejected_signal_key != signal_key)
+      {
+         NotifyRangeClassification(classification, range_points);
+         g_last_range_rejected_signal_key = signal_key;
+      }
+
+      return(true);
+   }
+
+   NotifyRangeClassification(classification, range_points);
 
    if(!SignalSetupManager_Add(signal, candle, levels, SIGNAL_DIRECTION_BUY))
    {

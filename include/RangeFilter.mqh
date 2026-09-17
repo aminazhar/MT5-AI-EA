@@ -12,19 +12,26 @@ enum RangeClassification
    RANGE_CLASSIFICATION_WIDE
 };
 
-bool RangeFilter_Classify(const FibonacciLevels &levels, double &range, RangeClassification &classification)
+// Returns the E3-to-E5 distance in symbol points, not raw price units.
+bool RangeFilter_Classify(
+   const FibonacciLevels &levels,
+   const string symbol,
+   double &range_points,
+   RangeClassification &classification
+)
 {
-   range = 0.0;
+   range_points = 0.0;
    classification = RANGE_CLASSIFICATION_UNKNOWN;
 
-   if(!MathIsValidNumber(levels.e3) || !MathIsValidNumber(levels.e5))
+   double point_size = SymbolInfoDouble(symbol, SYMBOL_POINT);
+   if(!MathIsValidNumber(levels.e3) || !MathIsValidNumber(levels.e5) || point_size <= 0.0)
       return(false);
 
-   range = MathAbs(levels.e3 - levels.e5);
+   range_points = MathAbs(levels.e3 - levels.e5) / point_size;
 
-   if(range < RANGE_REJECT_THRESHOLD)
+   if(range_points < RANGE_REJECT_THRESHOLD)
       classification = RANGE_CLASSIFICATION_REJECT;
-   else if(range <= RANGE_WIDE_THRESHOLD)
+   else if(range_points <= RANGE_WIDE_THRESHOLD)
       classification = RANGE_CLASSIFICATION_NORMAL;
    else
       classification = RANGE_CLASSIFICATION_WIDE;
