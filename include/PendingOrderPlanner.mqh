@@ -19,6 +19,7 @@ struct PendingOrderEntry
 {
    PendingOrderType type;
    double           price;
+   double           take_profit;
 };
 
 struct PendingOrderPlan
@@ -26,7 +27,7 @@ struct PendingOrderPlan
    string            symbol;
    double            volume;
    ulong             magic_number;
-   PendingOrderEntry entries[6];
+   PendingOrderEntry entries[MAX_PENDING_ORDERS];
    int               count;
 };
 
@@ -38,13 +39,14 @@ void PendingOrderPlanner_Reset(PendingOrderPlan &plan)
    plan.count = 0;
 }
 
-bool PendingOrderPlanner_Add(PendingOrderPlan &plan, const PendingOrderType type, const double price)
+bool PendingOrderPlanner_Add(PendingOrderPlan &plan, const PendingOrderType type, const double price, const double take_profit)
 {
-   if(plan.count >= MAX_PENDING_ORDERS || !MathIsValidNumber(price))
+   if(plan.count >= MAX_PENDING_ORDERS || !MathIsValidNumber(price) || !MathIsValidNumber(take_profit))
       return(false);
 
    plan.entries[plan.count].type = type;
    plan.entries[plan.count].price = price;
+   plan.entries[plan.count].take_profit = take_profit;
    plan.count++;
 
    return(true);
@@ -88,40 +90,52 @@ bool PendingOrderPlanner_Create(
       if(breakout.type == BREAKOUT_BUY)
       {
          return(
-            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_STOP, levels.bo) &&
-            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e3) &&
-            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e4) &&
-            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e5)
+            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.bo, levels.void_level) &&
+            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e3, levels.tp) &&
+            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e4, levels.tp_e4_e7) &&
+            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e5, levels.e3) &&
+            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e6, levels.e3) &&
+            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e7, levels.e3) &&
+            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e8, levels.e3) &&
+            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e9, levels.e3) &&
+            PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e10, levels.e3)
          );
       }
 
       return(
-         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_STOP, levels.bo) &&
-         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e3) &&
-         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e4) &&
-         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e5)
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.bo, levels.void_level) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e3, levels.tp) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e4, levels.tp_e4_e7) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e5, levels.e3) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e6, levels.e3) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e7, levels.e3) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e8, levels.e3) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e9, levels.e3) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e10, levels.e3)
       );
    }
 
    if(breakout.type == BREAKOUT_BUY)
    {
       return(
-         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e5) &&
-         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e6) &&
-         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e7) &&
-         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e8) &&
-         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e9) &&
-         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e10)
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e4, levels.tp_e4_e7) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e5, levels.e3) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e6, levels.e3) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e7, levels.e3) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e8, levels.e3) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e9, levels.e3) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_LIMIT, levels.e10, levels.e3)
       );
    }
 
    return(
-      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e5) &&
-      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e6) &&
-      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e7) &&
-      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e8) &&
-      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e9) &&
-      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e10)
+      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e4, levels.tp_e4_e7) &&
+      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e5, levels.e3) &&
+      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e6, levels.e3) &&
+      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e7, levels.e3) &&
+      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e8, levels.e3) &&
+      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e9, levels.e3) &&
+      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e10, levels.e3)
    );
 }
 

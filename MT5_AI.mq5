@@ -128,7 +128,7 @@ bool PrepareNewSignal(const Signal &signal)
 
    NotifyRangeClassification(classification, range_points);
 
-   if(!SignalSetupManager_Add(signal, candle, levels, SIGNAL_DIRECTION_BUY))
+   if(!SignalSetupManager_Add(signal, candle, levels, SIGNAL_DIRECTION_BUY, classification))
    {
       Print("[MT5-AI] Fibonacci drawing failed");
       return(false);

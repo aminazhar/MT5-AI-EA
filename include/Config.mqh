@@ -3,7 +3,7 @@
 
 #define SIGNAL_FILE "signal.json"
 
-input double InpOrderVolume = 0.0;
-input ulong InpMagicNumber = 0;
+input double InpOrderVolume = 0.10;
+input ulong InpMagicNumber = 42613;
 
 #endif

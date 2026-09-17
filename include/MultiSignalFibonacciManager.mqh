@@ -6,6 +6,10 @@
 #include "CandleFinder.mqh"
 #include "Fibonacci.mqh"
 #include "ChartDrawer.mqh"
+#include "RangeFilter.mqh"
+#include "PendingOrderPlanner.mqh"
+#include "TradeExecutor.mqh"
+#include "Config.mqh"
 
 enum SetupCompletionReason
 {
@@ -40,6 +44,10 @@ struct SignalSetup
    bool                  e5_visited;
    bool                  completed;
    SetupCompletionReason completion_reason;
+   RangeClassification   classification;
+   bool                  entry_orders_placed;
+   ulong                 order_tickets[MAX_PENDING_ORDERS];
+   int                   order_ticket_count;
 };
 
 SignalSetup g_signal_setups[MAX_ACTIVE_SIGNAL_SETUPS];
@@ -59,6 +67,11 @@ void SignalSetupManager_Reset(SignalSetup &setup)
    setup.e5_visited = false;
    setup.completed = false;
    setup.completion_reason = SETUP_COMPLETION_NONE;
+   setup.classification = RANGE_CLASSIFICATION_UNKNOWN;
+   setup.entry_orders_placed = false;
+   setup.order_ticket_count = 0;
+   for(int index = 0; index < MAX_PENDING_ORDERS; index++)
+      setup.order_tickets[index] = 0;
    Fibonacci_Reset(setup.levels);
 }
 
@@ -107,7 +120,8 @@ bool SignalSetupManager_Add(
    const Signal &signal,
    const Candle &candle,
    const FibonacciLevels &levels,
-   const SignalDirection direction
+   const SignalDirection direction,
+   const RangeClassification classification
 )
 {
    if(SignalSetupManager_Find(signal.symbol, signal.timestamp) >= 0)
@@ -131,9 +145,42 @@ bool SignalSetupManager_Add(
    g_signal_setups[slot].candle = candle;
    g_signal_setups[slot].levels = levels;
    g_signal_setups[slot].direction = direction;
+   g_signal_setups[slot].classification = classification;
    g_signal_setups[slot].object_name = object_name;
 
    PrintFormat("[MT5-AI] Setup added: %s", object_name);
+   return(true);
+}
+
+bool SignalSetupManager_PlaceEntryOrders(SignalSetup &setup)
+{
+   if(setup.entry_orders_placed || InpOrderVolume <= 0.0)
+      return(setup.entry_orders_placed);
+
+   BreakoutResult breakout;
+   BreakoutDetector_Reset(breakout);
+   breakout.type = setup.direction == SIGNAL_DIRECTION_BUY ? BREAKOUT_BUY : BREAKOUT_SELL;
+
+   PendingOrderPlan plan;
+   if(!PendingOrderPlanner_Create(setup.direction, setup.levels, setup.classification, breakout, plan))
+      return(false);
+
+   plan.symbol = setup.symbol;
+   plan.volume = InpOrderVolume;
+   plan.magic_number = InpMagicNumber;
+
+   TradeExecutionResult execution;
+   if(!TradeExecutor_Execute(plan, execution))
+      return(false);
+
+   for(int index = 0; index < execution.count && index < MAX_PENDING_ORDERS; index++)
+   {
+      if(execution.results[index].status == EXECUTION_STATUS_PLACED)
+         setup.order_tickets[setup.order_ticket_count++] = execution.results[index].ticket;
+   }
+
+   setup.entry_orders_placed = true;
+   PrintFormat("[MT5-AI] Pullback orders placed: %s (%d orders)", setup.object_name, setup.order_ticket_count);
    return(true);
 }
 
@@ -165,6 +212,9 @@ void SignalSetupManager_Complete(SignalSetup &setup, const SetupCompletionReason
 {
    if(setup.completed)
       return;
+
+   for(int index = 0; index < setup.order_ticket_count; index++)
+      TradeExecutor_CancelPendingOrder(setup.order_tickets[index]);
 
    if(!ChartDrawer_RemoveFibonacci(setup.object_name))
    {
@@ -207,14 +257,23 @@ void SignalSetupManager_MonitorSetup(SignalSetup &setup)
          setup.breakout_type = SETUP_BREAKOUT_BO;
          setup.breakout_candle_time = current_candle_time;
          PrintFormat("[MT5-AI] Setup breakout: %s (BO)", setup.object_name);
+         SignalSetupManager_PlaceEntryOrders(setup);
       }
       else if(SignalSetupManager_IsAtOrBelow(setup, bid, setup.levels.e4))
       {
-         setup.breakout_detected = true;
-         setup.breakout_type = SETUP_BREAKOUT_E4;
-         setup.breakout_candle_time = current_candle_time;
-         setup.e4_visited = true;
-         PrintFormat("[MT5-AI] Setup breakout: %s (E4)", setup.object_name);
+         FibonacciLevels sell_levels;
+         string sell_object_name = setup.object_name + "_SELL";
+         if(Fibonacci_Calculate(setup.candle, SIGNAL_DIRECTION_SELL, sell_levels) &&
+            ChartDrawer_RemoveFibonacci(setup.object_name) &&
+            ChartDrawer_DrawFibonacci(sell_object_name, setup.candle, SIGNAL_DIRECTION_SELL))
+         {
+            setup.levels = sell_levels;
+            setup.direction = SIGNAL_DIRECTION_SELL;
+            setup.object_name = sell_object_name;
+            setup.breakout_detected = false;
+            setup.breakout_type = SETUP_BREAKOUT_NONE;
+            PrintFormat("[MT5-AI] BUY Fibonacci flipped to SELL: %s", setup.object_name);
+         }
       }
 
       return;

@@ -21,7 +21,7 @@ struct OrderExecutionResult
 
 struct TradeExecutionResult
 {
-   OrderExecutionResult results[6];
+   OrderExecutionResult results[MAX_PENDING_ORDERS];
    int                  count;
 };
 
@@ -49,7 +49,7 @@ bool TradeExecutor_MapOrderType(const PendingOrderType pending_order_type, ENUM_
 bool TradeExecutor_IsPlanValid(const PendingOrderPlan &plan)
 {
    if(plan.count < 0 ||
-      plan.count > 6)
+      plan.count > MAX_PENDING_ORDERS)
       return(false);
 
    if(plan.count == 0)
@@ -64,6 +64,7 @@ bool TradeExecutor_IsPlanValid(const PendingOrderPlan &plan)
    {
       ENUM_ORDER_TYPE order_type;
       if(!MathIsValidNumber(plan.entries[index].price) ||
+         !MathIsValidNumber(plan.entries[index].take_profit) ||
          !TradeExecutor_MapOrderType(plan.entries[index].type, order_type))
          return(false);
    }
@@ -100,6 +101,7 @@ bool TradeExecutor_Execute(const PendingOrderPlan &plan, TradeExecutionResult &r
       request.symbol = plan.symbol;
       request.volume = plan.volume;
       request.price = plan.entries[index].price;
+      request.tp = plan.entries[index].take_profit;
       request.magic = plan.magic_number;
       request.type = order_type;
       request.type_time = ORDER_TIME_GTC;
@@ -117,6 +119,19 @@ bool TradeExecutor_Execute(const PendingOrderPlan &plan, TradeExecutionResult &r
    }
 
    return(true);
+}
+
+bool TradeExecutor_CancelPendingOrder(const ulong ticket)
+{
+   if(ticket == 0)
+      return(true);
+   MqlTradeRequest request;
+   MqlTradeResult response;
+   ZeroMemory(request);
+   ZeroMemory(response);
+   request.action = TRADE_ACTION_REMOVE;
+   request.order = ticket;
+   return(OrderSend(request, response) && response.retcode == TRADE_RETCODE_DONE);
 }
 
 #endif
