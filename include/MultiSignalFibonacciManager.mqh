@@ -16,6 +16,13 @@ enum SetupCompletionReason
    SETUP_COMPLETION_E5_TO_E3
 };
 
+enum SetupBreakoutType
+{
+   SETUP_BREAKOUT_NONE,
+   SETUP_BREAKOUT_BO,
+   SETUP_BREAKOUT_E4
+};
+
 struct SignalSetup
 {
    bool                  in_use;
@@ -26,6 +33,8 @@ struct SignalSetup
    SignalDirection       direction;
    string                object_name;
    bool                  breakout_detected;
+   SetupBreakoutType     breakout_type;
+   datetime              breakout_candle_time;
    bool                  e3_visited;
    bool                  e4_visited;
    bool                  e5_visited;
@@ -43,6 +52,8 @@ void SignalSetupManager_Reset(SignalSetup &setup)
    setup.direction = SIGNAL_DIRECTION_UNKNOWN;
    setup.object_name = "";
    setup.breakout_detected = false;
+   setup.breakout_type = SETUP_BREAKOUT_NONE;
+   setup.breakout_candle_time = 0;
    setup.e3_visited = false;
    setup.e4_visited = false;
    setup.e5_visited = false;
@@ -179,8 +190,49 @@ void SignalSetupManager_MonitorSetup(SignalSetup &setup)
    if(!SymbolInfoDouble(setup.symbol, SYMBOL_BID, bid))
       return;
 
-   if(SignalSetupManager_IsAtOrAbove(setup, bid, setup.levels.bo))
-      setup.breakout_detected = true;
+   datetime current_candle_time = iTime(setup.symbol, PERIOD_M1, 0);
+   if(current_candle_time == 0)
+      return;
+
+   // The signal candle defines the Fibonacci. It is never a completion event.
+   // Validation starts only after a later candle breaks BO or E4.
+   if(!setup.breakout_detected)
+   {
+      if(current_candle_time <= setup.candle.time)
+         return;
+
+      if(SignalSetupManager_IsAtOrAbove(setup, bid, setup.levels.bo))
+      {
+         setup.breakout_detected = true;
+         setup.breakout_type = SETUP_BREAKOUT_BO;
+         setup.breakout_candle_time = current_candle_time;
+         PrintFormat("[MT5-AI] Setup breakout: %s (BO)", setup.object_name);
+      }
+      else if(SignalSetupManager_IsAtOrBelow(setup, bid, setup.levels.e4))
+      {
+         setup.breakout_detected = true;
+         setup.breakout_type = SETUP_BREAKOUT_E4;
+         setup.breakout_candle_time = current_candle_time;
+         setup.e4_visited = true;
+         PrintFormat("[MT5-AI] Setup breakout: %s (E4)", setup.object_name);
+      }
+
+      return;
+   }
+
+   // Do not complete a setup on the same M1 candle that produced the breakout.
+   if(current_candle_time <= setup.breakout_candle_time)
+      return;
+
+   // A BO breakout is committed to the BO -> VOID route. Pullback rules do
+   // not apply to that setup unless it first breaks E4 instead.
+   if(setup.breakout_type == SETUP_BREAKOUT_BO)
+   {
+      if(SignalSetupManager_IsAtOrAbove(setup, bid, setup.levels.void_level))
+         SignalSetupManager_Complete(setup, SETUP_COMPLETION_BO_TO_VOID);
+
+      return;
+   }
 
    if(SignalSetupManager_IsAtOrBelow(setup, bid, setup.levels.e3))
       setup.e3_visited = true;
@@ -191,9 +243,7 @@ void SignalSetupManager_MonitorSetup(SignalSetup &setup)
    if(SignalSetupManager_IsAtOrBelow(setup, bid, setup.levels.e5))
       setup.e5_visited = true;
 
-   if(setup.breakout_detected && SignalSetupManager_IsAtOrAbove(setup, bid, setup.levels.void_level))
-      SignalSetupManager_Complete(setup, SETUP_COMPLETION_BO_TO_VOID);
-   else if(setup.e5_visited && SignalSetupManager_IsAtOrAbove(setup, bid, setup.levels.e3))
+   if(setup.e5_visited && SignalSetupManager_IsAtOrAbove(setup, bid, setup.levels.e3))
       SignalSetupManager_Complete(setup, SETUP_COMPLETION_E5_TO_E3);
    else if(setup.e4_visited && SignalSetupManager_IsAtOrAbove(setup, bid, setup.levels.tp_e4_e7))
       SignalSetupManager_Complete(setup, SETUP_COMPLETION_E4_TO_TP_E4_E7);
