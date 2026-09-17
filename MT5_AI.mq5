@@ -154,3 +154,8 @@ void OnTick()
    // to monitor setups on every tracked symbol.
    SignalSetupManager_MonitorAll();
 }
+
+void OnTradeTransaction(const MqlTradeTransaction &transaction, const MqlTradeRequest &request, const MqlTradeResult &result)
+{
+   SignalSetupManager_OnTradeTransaction(transaction);
+}

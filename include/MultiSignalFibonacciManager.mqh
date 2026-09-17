@@ -47,6 +47,8 @@ struct SignalSetup
    RangeClassification   classification;
    bool                  entry_orders_placed;
    ulong                 order_tickets[MAX_PENDING_ORDERS];
+   ulong                 position_ids[MAX_PENDING_ORDERS];
+   double                order_targets[MAX_PENDING_ORDERS];
    int                   order_ticket_count;
 };
 
@@ -71,7 +73,11 @@ void SignalSetupManager_Reset(SignalSetup &setup)
    setup.entry_orders_placed = false;
    setup.order_ticket_count = 0;
    for(int index = 0; index < MAX_PENDING_ORDERS; index++)
+   {
       setup.order_tickets[index] = 0;
+      setup.position_ids[index] = 0;
+      setup.order_targets[index] = 0.0;
+   }
    Fibonacci_Reset(setup.levels);
 }
 
@@ -176,12 +182,77 @@ bool SignalSetupManager_PlaceEntryOrders(SignalSetup &setup)
    for(int index = 0; index < execution.count && index < MAX_PENDING_ORDERS; index++)
    {
       if(execution.results[index].status == EXECUTION_STATUS_PLACED)
-         setup.order_tickets[setup.order_ticket_count++] = execution.results[index].ticket;
+      {
+         int layer = setup.order_ticket_count++;
+         setup.order_tickets[layer] = execution.results[index].ticket;
+         setup.order_targets[layer] = plan.entries[index].take_profit;
+      }
    }
 
    setup.entry_orders_placed = true;
    PrintFormat("[MT5-AI] Pullback orders placed: %s (%d orders)", setup.object_name, setup.order_ticket_count);
    return(true);
+}
+
+void SignalSetupManager_OnTradeTransaction(const MqlTradeTransaction &transaction)
+{
+   if(transaction.type != TRADE_TRANSACTION_DEAL_ADD || transaction.deal == 0)
+      return;
+
+   ulong order_ticket = (ulong)HistoryDealGetInteger(transaction.deal, DEAL_ORDER);
+   ulong position_id = (ulong)HistoryDealGetInteger(transaction.deal, DEAL_POSITION_ID);
+   if(order_ticket == 0 || position_id == 0)
+      return;
+
+   for(int setup_index = 0; setup_index < MAX_ACTIVE_SIGNAL_SETUPS; setup_index++)
+   {
+      for(int layer = 0; layer < g_signal_setups[setup_index].order_ticket_count; layer++)
+      {
+         if(g_signal_setups[setup_index].order_tickets[layer] == order_ticket)
+            g_signal_setups[setup_index].position_ids[layer] = position_id;
+      }
+   }
+}
+
+void SignalSetupManager_MonitorFallbackExits(SignalSetup &setup)
+{
+   double bid;
+   double ask;
+   if(!SymbolInfoDouble(setup.symbol, SYMBOL_BID, bid) || !SymbolInfoDouble(setup.symbol, SYMBOL_ASK, ask))
+      return;
+
+   for(int layer = 0; layer < setup.order_ticket_count; layer++)
+   {
+      if(setup.position_ids[layer] == 0 || setup.order_targets[layer] <= 0.0)
+         continue;
+
+      for(int position_index = PositionsTotal() - 1; position_index >= 0; position_index--)
+      {
+         ulong position_ticket = PositionGetTicket(position_index);
+         if(position_ticket == 0 ||
+            (ulong)PositionGetInteger(POSITION_IDENTIFIER) != setup.position_ids[layer])
+            continue;
+
+         bool target_hit = setup.direction == SIGNAL_DIRECTION_BUY ?
+                           bid >= setup.order_targets[layer] : ask <= setup.order_targets[layer];
+         if(!target_hit)
+            continue;
+
+         MqlTradeRequest request;
+         MqlTradeResult response;
+         ZeroMemory(request);
+         ZeroMemory(response);
+         request.action = TRADE_ACTION_DEAL;
+         request.position = position_ticket;
+         request.symbol = setup.symbol;
+         request.volume = PositionGetDouble(POSITION_VOLUME);
+         request.type = setup.direction == SIGNAL_DIRECTION_BUY ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+         request.price = setup.direction == SIGNAL_DIRECTION_BUY ? bid : ask;
+         request.magic = InpMagicNumber;
+         if(!OrderSend(request, response))
+            PrintFormat("[MT5-AI] Fallback close failed: position=%I64u retcode=%u", position_ticket, response.retcode);
+      }
+   }
 }
 
 bool SignalSetupManager_IsAtOrAbove(const SignalSetup &setup, const double price, const double level)
@@ -235,6 +306,8 @@ void SignalSetupManager_MonitorSetup(SignalSetup &setup)
 {
    if(!setup.in_use || setup.completed)
       return;
+
+   SignalSetupManager_MonitorFallbackExits(setup);
 
    double bid;
    if(!SymbolInfoDouble(setup.symbol, SYMBOL_BID, bid))
