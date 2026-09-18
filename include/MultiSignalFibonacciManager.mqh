@@ -27,6 +27,49 @@ enum SetupBreakoutType
    SETUP_BREAKOUT_E4
 };
 
+enum HistoricalRecoveryState
+{
+   HISTORICAL_RECOVERY_NONE,
+   HISTORICAL_RECOVERY_BO_ACTIVE,
+   HISTORICAL_RECOVERY_COMPLETED
+};
+
+HistoricalRecoveryState SignalSetupManager_ScanBuyHistory(
+   const string symbol,
+   const datetime signal_time,
+   const FibonacciLevels &levels,
+   datetime &breakout_time
+)
+{
+   breakout_time = 0;
+   MqlRates candles[];
+   datetime last_closed_candle = iTime(symbol, PERIOD_M1, 1);
+   if(last_closed_candle == 0 || last_closed_candle <= signal_time)
+      return(HISTORICAL_RECOVERY_NONE);
+
+   int copied = CopyRates(symbol, PERIOD_M1, signal_time + 60, last_closed_candle, candles);
+   if(copied <= 0)
+      return(HISTORICAL_RECOVERY_NONE);
+
+   bool bo_broken = false;
+   for(int index = 0; index < copied; index++)
+   {
+      if(!bo_broken && candles[index].high >= levels.bo)
+      {
+         bo_broken = true;
+         breakout_time = candles[index].time;
+         // The breakout candle only arms the route. Completion validation
+         // begins with the following closed M1 candle.
+         continue;
+      }
+
+      if(bo_broken && candles[index].high >= levels.void_level)
+         return(HISTORICAL_RECOVERY_COMPLETED);
+   }
+
+   return(bo_broken ? HISTORICAL_RECOVERY_BO_ACTIVE : HISTORICAL_RECOVERY_NONE);
+}
+
 struct SignalSetup
 {
    bool                  in_use;
@@ -42,10 +85,13 @@ struct SignalSetup
    bool                  e3_visited;
    bool                  e4_visited;
    bool                  e5_visited;
+   bool                  e4_target_moved_to_e3;
    bool                  completed;
    SetupCompletionReason completion_reason;
    RangeClassification   classification;
    bool                  entry_orders_placed;
+   bool                  recovered_from_history;
+   bool                  recovered_level_touched[MAX_PENDING_ORDERS];
    ulong                 order_tickets[MAX_PENDING_ORDERS];
    ulong                 position_ids[MAX_PENDING_ORDERS];
    double                order_targets[MAX_PENDING_ORDERS];
@@ -67,14 +113,17 @@ void SignalSetupManager_Reset(SignalSetup &setup)
    setup.e3_visited = false;
    setup.e4_visited = false;
    setup.e5_visited = false;
+   setup.e4_target_moved_to_e3 = false;
    setup.completed = false;
    setup.completion_reason = SETUP_COMPLETION_NONE;
    setup.classification = RANGE_CLASSIFICATION_UNKNOWN;
    setup.entry_orders_placed = false;
+   setup.recovered_from_history = false;
    setup.order_ticket_count = 0;
    for(int index = 0; index < MAX_PENDING_ORDERS; index++)
    {
       setup.order_tickets[index] = 0;
+      setup.recovered_level_touched[index] = false;
       setup.position_ids[index] = 0;
       setup.order_targets[index] = 0.0;
    }
@@ -158,6 +207,50 @@ bool SignalSetupManager_Add(
    return(true);
 }
 
+string SignalSetupManager_OrderComment(const SignalSetup &setup)
+{
+   return("MT5AI_" + IntegerToString((long)setup.timestamp) + "_" +
+          (setup.direction == SIGNAL_DIRECTION_BUY ? "B" : "S"));
+}
+
+void SignalSetupManager_MarkRecoveryTouchedLevels(SignalSetup &setup, const datetime breakout_time)
+{
+   MqlRates candles[];
+   datetime last_closed_candle = iTime(setup.symbol, PERIOD_M1, 1);
+   if(last_closed_candle <= breakout_time ||
+      CopyRates(setup.symbol, PERIOD_M1, breakout_time + 60, last_closed_candle, candles) <= 0)
+      return;
+
+   for(int index = 0; index < ArraySize(candles); index++)
+   {
+      setup.recovered_level_touched[0] = setup.recovered_level_touched[0] || candles[index].low <= setup.levels.bo;
+      setup.recovered_level_touched[1] = setup.recovered_level_touched[1] || candles[index].low <= setup.levels.e3;
+      setup.recovered_level_touched[2] = setup.recovered_level_touched[2] || candles[index].low <= setup.levels.e4;
+      setup.recovered_level_touched[3] = setup.recovered_level_touched[3] || candles[index].low <= setup.levels.e5;
+      setup.recovered_level_touched[4] = setup.recovered_level_touched[4] || candles[index].low <= setup.levels.e6;
+      setup.recovered_level_touched[5] = setup.recovered_level_touched[5] || candles[index].low <= setup.levels.e7;
+      setup.recovered_level_touched[6] = setup.recovered_level_touched[6] || candles[index].low <= setup.levels.e8;
+      setup.recovered_level_touched[7] = setup.recovered_level_touched[7] || candles[index].low <= setup.levels.e9;
+      setup.recovered_level_touched[8] = setup.recovered_level_touched[8] || candles[index].low <= setup.levels.e10;
+   }
+}
+
+bool SignalSetupManager_IsRecoveredLevelTouched(const SignalSetup &setup, const double price)
+{
+   if(!setup.recovered_from_history)
+      return(false);
+
+   return((price == setup.levels.bo && setup.recovered_level_touched[0]) ||
+          (price == setup.levels.e3 && setup.recovered_level_touched[1]) ||
+          (price == setup.levels.e4 && setup.recovered_level_touched[2]) ||
+          (price == setup.levels.e5 && setup.recovered_level_touched[3]) ||
+          (price == setup.levels.e6 && setup.recovered_level_touched[4]) ||
+          (price == setup.levels.e7 && setup.recovered_level_touched[5]) ||
+          (price == setup.levels.e8 && setup.recovered_level_touched[6]) ||
+          (price == setup.levels.e9 && setup.recovered_level_touched[7]) ||
+          (price == setup.levels.e10 && setup.recovered_level_touched[8]));
+}
+
 bool SignalSetupManager_PlaceEntryOrders(SignalSetup &setup)
 {
    if(setup.entry_orders_placed || InpOrderVolume <= 0.0)
@@ -174,9 +267,22 @@ bool SignalSetupManager_PlaceEntryOrders(SignalSetup &setup)
    plan.symbol = setup.symbol;
    plan.volume = InpOrderVolume;
    plan.magic_number = InpMagicNumber;
+   plan.comment = SignalSetupManager_OrderComment(setup);
+
+   PendingOrderPlan filtered_plan;
+   PendingOrderPlanner_Reset(filtered_plan);
+   filtered_plan.symbol = plan.symbol;
+   filtered_plan.volume = plan.volume;
+   filtered_plan.magic_number = plan.magic_number;
+   filtered_plan.comment = plan.comment;
+   for(int index = 0; index < plan.count; index++)
+   {
+      if(!SignalSetupManager_IsRecoveredLevelTouched(setup, plan.entries[index].price))
+         PendingOrderPlanner_Add(filtered_plan, plan.entries[index].type, plan.entries[index].price, plan.entries[index].take_profit);
+   }
 
    TradeExecutionResult execution;
-   if(!TradeExecutor_Execute(plan, execution))
+   if(!TradeExecutor_Execute(filtered_plan, execution))
       return(false);
 
    for(int index = 0; index < execution.count && index < MAX_PENDING_ORDERS; index++)
@@ -185,11 +291,27 @@ bool SignalSetupManager_PlaceEntryOrders(SignalSetup &setup)
       {
          int layer = setup.order_ticket_count++;
          setup.order_tickets[layer] = execution.results[index].ticket;
-         setup.order_targets[layer] = plan.entries[index].take_profit;
+         setup.order_targets[layer] = filtered_plan.entries[index].take_profit;
+      }
+      else
+      {
+         PrintFormat(
+            "[MT5-AI] Pending order rejected: %s price=%G TP=%G retcode=%u",
+            setup.object_name,
+            filtered_plan.entries[index].price,
+            filtered_plan.entries[index].take_profit,
+            execution.results[index].retcode
+         );
       }
    }
 
-   setup.entry_orders_placed = true;
+   setup.entry_orders_placed = setup.order_ticket_count > 0;
+   if(!setup.entry_orders_placed)
+   {
+      PrintFormat("[MT5-AI] No pending orders were accepted: %s", setup.object_name);
+      return(false);
+   }
+
    PrintFormat("[MT5-AI] Pullback orders placed: %s (%d orders)", setup.object_name, setup.order_ticket_count);
    return(true);
 }
@@ -213,6 +335,8 @@ void SignalSetupManager_OnTradeTransaction(const MqlTradeTransaction &transactio
       }
    }
 }
+
+void SignalSetupManager_Complete(SignalSetup &setup, const SetupCompletionReason reason);
 
 void SignalSetupManager_MonitorFallbackExits(SignalSetup &setup)
 {
@@ -238,19 +362,8 @@ void SignalSetupManager_MonitorFallbackExits(SignalSetup &setup)
          if(!target_hit)
             continue;
 
-         MqlTradeRequest request;
-         MqlTradeResult response;
-         ZeroMemory(request);
-         ZeroMemory(response);
-         request.action = TRADE_ACTION_DEAL;
-         request.position = position_ticket;
-         request.symbol = setup.symbol;
-         request.volume = PositionGetDouble(POSITION_VOLUME);
-         request.type = setup.direction == SIGNAL_DIRECTION_BUY ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
-         request.price = setup.direction == SIGNAL_DIRECTION_BUY ? bid : ask;
-         request.magic = InpMagicNumber;
-         if(!OrderSend(request, response))
-            PrintFormat("[MT5-AI] Fallback close failed: position=%I64u retcode=%u", position_ticket, response.retcode);
+         SignalSetupManager_Complete(setup, SETUP_COMPLETION_NONE);
+         return;
       }
    }
 }
@@ -279,13 +392,88 @@ string SignalSetupManager_CompletionReasonName(const SetupCompletionReason reaso
    return("NONE");
 }
 
+void SignalSetupManager_CloseTrackedPositions(SignalSetup &setup)
+{
+   for(int position_index = PositionsTotal() - 1; position_index >= 0; position_index--)
+   {
+      ulong position_ticket = PositionGetTicket(position_index);
+      if(position_ticket == 0)
+         continue;
+
+      ulong position_id = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
+      bool belongs_to_setup = PositionGetString(POSITION_COMMENT) == SignalSetupManager_OrderComment(setup);
+      for(int layer = 0; layer < setup.order_ticket_count; layer++)
+      {
+         if(setup.position_ids[layer] == position_id)
+         {
+            belongs_to_setup = true;
+            break;
+         }
+      }
+      if(!belongs_to_setup)
+         continue;
+
+      MqlTradeRequest request;
+      MqlTradeResult response;
+      ZeroMemory(request);
+      ZeroMemory(response);
+      request.action = TRADE_ACTION_DEAL;
+      request.position = position_ticket;
+      request.symbol = setup.symbol;
+      request.volume = PositionGetDouble(POSITION_VOLUME);
+      request.type = setup.direction == SIGNAL_DIRECTION_BUY ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+      request.price = setup.direction == SIGNAL_DIRECTION_BUY ? SymbolInfoDouble(setup.symbol, SYMBOL_BID) : SymbolInfoDouble(setup.symbol, SYMBOL_ASK);
+      request.magic = InpMagicNumber;
+      if(!OrderSend(request, response))
+         PrintFormat("[MT5-AI] Basket close failed: position=%I64u retcode=%u", position_ticket, response.retcode);
+   }
+}
+
+void SignalSetupManager_MoveE4TargetToE3(SignalSetup &setup)
+{
+   if(setup.e4_target_moved_to_e3)
+      return;
+
+   for(int layer = 0; layer < setup.order_ticket_count; layer++)
+   {
+      if(setup.order_targets[layer] != setup.levels.tp_e4_e7)
+         continue;
+
+      setup.order_targets[layer] = setup.levels.e3;
+      for(int position_index = PositionsTotal() - 1; position_index >= 0; position_index--)
+      {
+         ulong position_ticket = PositionGetTicket(position_index);
+         if(position_ticket == 0 ||
+            (ulong)PositionGetInteger(POSITION_IDENTIFIER) != setup.position_ids[layer])
+            continue;
+
+         MqlTradeRequest request;
+         MqlTradeResult response;
+         ZeroMemory(request);
+         ZeroMemory(response);
+         request.action = TRADE_ACTION_SLTP;
+         request.position = position_ticket;
+         request.symbol = setup.symbol;
+         request.tp = setup.levels.e3;
+         if(!OrderSend(request, response))
+            PrintFormat("[MT5-AI] E4 TP move to E3 failed: position=%I64u retcode=%u", position_ticket, response.retcode);
+      }
+   }
+
+   setup.e4_target_moved_to_e3 = true;
+   PrintFormat("[MT5-AI] E5 reached: E4 target moved to E3 for %s", setup.object_name);
+}
+
 void SignalSetupManager_Complete(SignalSetup &setup, const SetupCompletionReason reason)
 {
    if(setup.completed)
       return;
 
+   SignalSetupManager_CloseTrackedPositions(setup);
+
    for(int index = 0; index < setup.order_ticket_count; index++)
       TradeExecutor_CancelPendingOrder(setup.order_tickets[index]);
+   TradeExecutor_CancelSetupPendingOrders(setup.symbol, InpMagicNumber, SignalSetupManager_OrderComment(setup));
 
    if(!ChartDrawer_RemoveFibonacci(setup.object_name))
    {
@@ -309,10 +497,6 @@ void SignalSetupManager_MonitorSetup(SignalSetup &setup)
 
    SignalSetupManager_MonitorFallbackExits(setup);
 
-   double bid;
-   if(!SymbolInfoDouble(setup.symbol, SYMBOL_BID, bid))
-      return;
-
    datetime current_candle_time = iTime(setup.symbol, PERIOD_M1, 0);
    if(current_candle_time == 0)
       return;
@@ -321,18 +505,29 @@ void SignalSetupManager_MonitorSetup(SignalSetup &setup)
    // Validation starts only after a later candle breaks BO or E4.
    if(!setup.breakout_detected)
    {
-      if(current_candle_time <= setup.candle.time)
+      datetime closed_candle_time = iTime(setup.symbol, PERIOD_M1, 1);
+      if(closed_candle_time == 0 || closed_candle_time <= setup.candle.time)
          return;
 
-      if(SignalSetupManager_IsAtOrAbove(setup, bid, setup.levels.bo))
+      double closed_high = iHigh(setup.symbol, PERIOD_M1, 1);
+      double closed_low = iLow(setup.symbol, PERIOD_M1, 1);
+      if(closed_high <= 0.0 || closed_low <= 0.0)
+         return;
+
+      bool bo_broken = setup.direction == SIGNAL_DIRECTION_BUY ?
+                        closed_high >= setup.levels.bo : closed_low <= setup.levels.bo;
+      bool e4_broken = setup.direction == SIGNAL_DIRECTION_BUY ?
+                        closed_low <= setup.levels.e4 : closed_high >= setup.levels.e4;
+
+      if(bo_broken)
       {
          setup.breakout_detected = true;
          setup.breakout_type = SETUP_BREAKOUT_BO;
-         setup.breakout_candle_time = current_candle_time;
+         setup.breakout_candle_time = closed_candle_time;
          PrintFormat("[MT5-AI] Setup breakout: %s (BO)", setup.object_name);
          SignalSetupManager_PlaceEntryOrders(setup);
       }
-      else if(SignalSetupManager_IsAtOrBelow(setup, bid, setup.levels.e4))
+      else if(e4_broken && setup.direction == SIGNAL_DIRECTION_BUY)
       {
          FibonacciLevels sell_levels;
          string sell_object_name = setup.object_name + "_SELL";
@@ -343,9 +538,11 @@ void SignalSetupManager_MonitorSetup(SignalSetup &setup)
             setup.levels = sell_levels;
             setup.direction = SIGNAL_DIRECTION_SELL;
             setup.object_name = sell_object_name;
-            setup.breakout_detected = false;
-            setup.breakout_type = SETUP_BREAKOUT_NONE;
+            setup.breakout_detected = true;
+            setup.breakout_type = SETUP_BREAKOUT_E4;
+            setup.breakout_candle_time = closed_candle_time;
             PrintFormat("[MT5-AI] BUY Fibonacci flipped to SELL: %s", setup.object_name);
+            SignalSetupManager_PlaceEntryOrders(setup);
          }
       }
 
@@ -353,33 +550,50 @@ void SignalSetupManager_MonitorSetup(SignalSetup &setup)
    }
 
    // Do not complete a setup on the same M1 candle that produced the breakout.
-   if(current_candle_time <= setup.breakout_candle_time)
+   datetime closed_candle_time = iTime(setup.symbol, PERIOD_M1, 1);
+   if(closed_candle_time == 0 || closed_candle_time <= setup.breakout_candle_time)
       return;
+
+   double closed_high = iHigh(setup.symbol, PERIOD_M1, 1);
+   double closed_low = iLow(setup.symbol, PERIOD_M1, 1);
+   if(closed_high <= 0.0 || closed_low <= 0.0)
+      return;
+
+   bool entry_level_touched = setup.direction == SIGNAL_DIRECTION_BUY ?
+                              closed_low <= setup.levels.e3 : closed_high >= setup.levels.e3;
+   bool e4_level_touched = setup.direction == SIGNAL_DIRECTION_BUY ?
+                           closed_low <= setup.levels.e4 : closed_high >= setup.levels.e4;
+   bool e5_level_touched = setup.direction == SIGNAL_DIRECTION_BUY ?
+                           closed_low <= setup.levels.e5 : closed_high >= setup.levels.e5;
 
    // A BO breakout is committed to the BO -> VOID route. Pullback rules do
    // not apply to that setup unless it first breaks E4 instead.
    if(setup.breakout_type == SETUP_BREAKOUT_BO)
    {
-      if(SignalSetupManager_IsAtOrAbove(setup, bid, setup.levels.void_level))
+      if(SignalSetupManager_IsAtOrAbove(setup, setup.direction == SIGNAL_DIRECTION_BUY ? closed_high : closed_low, setup.levels.void_level))
          SignalSetupManager_Complete(setup, SETUP_COMPLETION_BO_TO_VOID);
 
       return;
    }
 
-   if(SignalSetupManager_IsAtOrBelow(setup, bid, setup.levels.e3))
+   if(entry_level_touched)
       setup.e3_visited = true;
 
-   if(SignalSetupManager_IsAtOrBelow(setup, bid, setup.levels.e4))
+   if(e4_level_touched)
       setup.e4_visited = true;
 
-   if(SignalSetupManager_IsAtOrBelow(setup, bid, setup.levels.e5))
+   if(e5_level_touched)
+   {
       setup.e5_visited = true;
+      SignalSetupManager_MoveE4TargetToE3(setup);
+   }
 
-   if(setup.e5_visited && SignalSetupManager_IsAtOrAbove(setup, bid, setup.levels.e3))
+   double target_price = setup.direction == SIGNAL_DIRECTION_BUY ? closed_high : closed_low;
+   if(setup.e5_visited && SignalSetupManager_IsAtOrAbove(setup, target_price, setup.levels.e3))
       SignalSetupManager_Complete(setup, SETUP_COMPLETION_E5_TO_E3);
-   else if(setup.e4_visited && SignalSetupManager_IsAtOrAbove(setup, bid, setup.levels.tp_e4_e7))
+   else if(setup.e4_visited && SignalSetupManager_IsAtOrAbove(setup, target_price, setup.levels.tp_e4_e7))
       SignalSetupManager_Complete(setup, SETUP_COMPLETION_E4_TO_TP_E4_E7);
-   else if(setup.e3_visited && SignalSetupManager_IsAtOrAbove(setup, bid, setup.levels.tp))
+   else if(setup.e3_visited && SignalSetupManager_IsAtOrAbove(setup, target_price, setup.levels.tp))
       SignalSetupManager_Complete(setup, SETUP_COMPLETION_E3_TO_TP);
 }
 

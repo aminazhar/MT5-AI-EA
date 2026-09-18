@@ -35,6 +35,7 @@ bool ChartDrawer_DrawFibonacci(
       ObjectDelete(0, object_name);
 
    datetime second_anchor_time = candle.time + PeriodSeconds(PERIOD_M1);
+   // BUY draws top-to-bottom; flipped SELL draws bottom-to-top.
    double first_anchor_price = direction == SIGNAL_DIRECTION_BUY ? candle.high : candle.low;
    double second_anchor_price = direction == SIGNAL_DIRECTION_BUY ? candle.low : candle.high;
 

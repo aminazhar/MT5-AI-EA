@@ -62,7 +62,9 @@ bool Fibonacci_Calculate(const Candle &candle, const SignalDirection direction, 
       return(false);
 
    const double range = candle.high - candle.low;
-   const double anchor = direction == SIGNAL_DIRECTION_BUY ? candle.high : candle.low;
+   // The flipped SELL chart draws bottom-to-top. MT5 maps its visible zero
+   // level to the candle high, so order levels must use that same anchor.
+   const double anchor = candle.high;
    const double orientation = direction == SIGNAL_DIRECTION_BUY ? 1.0 : -1.0;
 
    levels.void_level = anchor + (range * FIBONACCI_RATIO_VOID * orientation);

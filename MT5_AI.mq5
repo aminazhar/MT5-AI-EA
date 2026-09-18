@@ -113,6 +113,14 @@ bool PrepareNewSignal(const Signal &signal)
 
    PrintFormat("[MT5-AI] Range: Points=%.0f", range_points);
 
+   datetime recovered_breakout_time;
+   HistoricalRecoveryState recovery = SignalSetupManager_ScanBuyHistory(signal.symbol, signal.timestamp, levels, recovered_breakout_time);
+   if(recovery == HISTORICAL_RECOVERY_COMPLETED)
+   {
+      Print("[MT5-AI] Historical recovery: BO->VOID already completed; Fibonacci not redrawn");
+      return(true);
+   }
+
    string signal_key = SignalKey(signal);
    if(classification == RANGE_CLASSIFICATION_REJECT)
    {
@@ -132,6 +140,21 @@ bool PrepareNewSignal(const Signal &signal)
    {
       Print("[MT5-AI] Fibonacci drawing failed");
       return(false);
+   }
+
+   if(recovery == HISTORICAL_RECOVERY_BO_ACTIVE)
+   {
+      int setup_index = SignalSetupManager_Find(signal.symbol, signal.timestamp);
+      if(setup_index >= 0)
+      {
+         g_signal_setups[setup_index].breakout_detected = true;
+         g_signal_setups[setup_index].breakout_type = SETUP_BREAKOUT_BO;
+         g_signal_setups[setup_index].breakout_candle_time = recovered_breakout_time;
+         g_signal_setups[setup_index].recovered_from_history = true;
+         SignalSetupManager_MarkRecoveryTouchedLevels(g_signal_setups[setup_index], g_signal_setups[setup_index].breakout_candle_time);
+         SignalSetupManager_PlaceEntryOrders(g_signal_setups[setup_index]);
+         Print("[MT5-AI] Historical recovery: BO breakout restored; pullback orders placed");
+      }
    }
 
    Print("[MT5-AI] Initial BUY Fibonacci drawn; execution remains disabled");

@@ -27,6 +27,7 @@ struct PendingOrderPlan
    string            symbol;
    double            volume;
    ulong             magic_number;
+   string            comment;
    PendingOrderEntry entries[MAX_PENDING_ORDERS];
    int               count;
 };
@@ -36,6 +37,7 @@ void PendingOrderPlanner_Reset(PendingOrderPlan &plan)
    plan.symbol = "";
    plan.volume = 0.0;
    plan.magic_number = 0;
+   plan.comment = "";
    plan.count = 0;
 }
 

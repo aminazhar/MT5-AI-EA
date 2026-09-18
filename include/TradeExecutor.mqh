@@ -103,6 +103,7 @@ bool TradeExecutor_Execute(const PendingOrderPlan &plan, TradeExecutionResult &r
       request.price = plan.entries[index].price;
       request.tp = plan.entries[index].take_profit;
       request.magic = plan.magic_number;
+      request.comment = plan.comment;
       request.type = order_type;
       request.type_time = ORDER_TIME_GTC;
       request.type_filling = ORDER_FILLING_RETURN;
@@ -132,6 +133,21 @@ bool TradeExecutor_CancelPendingOrder(const ulong ticket)
    request.action = TRADE_ACTION_REMOVE;
    request.order = ticket;
    return(OrderSend(request, response) && response.retcode == TRADE_RETCODE_DONE);
+}
+
+void TradeExecutor_CancelSetupPendingOrders(const string symbol, const ulong magic_number, const string comment)
+{
+   for(int index = OrdersTotal() - 1; index >= 0; index--)
+   {
+      ulong ticket = OrderGetTicket(index);
+      if(ticket == 0 ||
+         OrderGetString(ORDER_SYMBOL) != symbol ||
+         (ulong)OrderGetInteger(ORDER_MAGIC) != magic_number ||
+         OrderGetString(ORDER_COMMENT) != comment)
+         continue;
+
+      TradeExecutor_CancelPendingOrder(ticket);
+   }
 }
 
 #endif
