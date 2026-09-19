@@ -5,5 +5,7 @@
 
 input double InpOrderVolume = 0.10;
 input ulong InpMagicNumber = 42613;
+input bool InpEnableFiboBreakoutStops = false;
+input bool InpEnableAutoTrade = false;
 
 #endif

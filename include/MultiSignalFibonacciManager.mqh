@@ -82,6 +82,7 @@ struct SignalSetup
    bool                  breakout_detected;
    SetupBreakoutType     breakout_type;
    datetime              breakout_candle_time;
+   datetime              last_evaluated_candle_time;
    bool                  e3_visited;
    bool                  e4_visited;
    bool                  e5_visited;
@@ -90,6 +91,11 @@ struct SignalSetup
    SetupCompletionReason completion_reason;
    RangeClassification   classification;
    bool                  entry_orders_placed;
+   bool                  breakout_stop_placement_attempted;
+   bool                  breakout_stop_orders_placed;
+   bool                  breakout_stop_triggered;
+   ulong                 breakout_buy_stop_ticket;
+   ulong                 breakout_sell_stop_ticket;
    bool                  recovered_from_history;
    bool                  recovered_level_touched[MAX_PENDING_ORDERS];
    ulong                 order_tickets[MAX_PENDING_ORDERS];
@@ -110,6 +116,7 @@ void SignalSetupManager_Reset(SignalSetup &setup)
    setup.breakout_detected = false;
    setup.breakout_type = SETUP_BREAKOUT_NONE;
    setup.breakout_candle_time = 0;
+   setup.last_evaluated_candle_time = 0;
    setup.e3_visited = false;
    setup.e4_visited = false;
    setup.e5_visited = false;
@@ -118,6 +125,11 @@ void SignalSetupManager_Reset(SignalSetup &setup)
    setup.completion_reason = SETUP_COMPLETION_NONE;
    setup.classification = RANGE_CLASSIFICATION_UNKNOWN;
    setup.entry_orders_placed = false;
+   setup.breakout_stop_placement_attempted = false;
+   setup.breakout_stop_orders_placed = false;
+   setup.breakout_stop_triggered = false;
+   setup.breakout_buy_stop_ticket = 0;
+   setup.breakout_sell_stop_ticket = 0;
    setup.recovered_from_history = false;
    setup.order_ticket_count = 0;
    for(int index = 0; index < MAX_PENDING_ORDERS; index++)
@@ -202,6 +214,9 @@ bool SignalSetupManager_Add(
    g_signal_setups[slot].direction = direction;
    g_signal_setups[slot].classification = classification;
    g_signal_setups[slot].object_name = object_name;
+   // The signal candle defines the Fibonacci only. Evaluation begins with
+   // the following fully closed M1 candle.
+   g_signal_setups[slot].last_evaluated_candle_time = candle.time;
 
    PrintFormat("[MT5-AI] Setup added: %s", object_name);
    return(true);
@@ -211,6 +226,11 @@ string SignalSetupManager_OrderComment(const SignalSetup &setup)
 {
    return("MT5AI_" + IntegerToString((long)setup.timestamp) + "_" +
           (setup.direction == SIGNAL_DIRECTION_BUY ? "B" : "S"));
+}
+
+string SignalSetupManager_BreakoutStopOrderComment(const SignalSetup &setup)
+{
+   return("MT5BO_" + IntegerToString((long)setup.timestamp));
 }
 
 void SignalSetupManager_MarkRecoveryTouchedLevels(SignalSetup &setup, const datetime breakout_time)
@@ -253,6 +273,9 @@ bool SignalSetupManager_IsRecoveredLevelTouched(const SignalSetup &setup, const 
 
 bool SignalSetupManager_PlaceEntryOrders(SignalSetup &setup)
 {
+   if(!InpEnableAutoTrade)
+      return(false);
+
    if(setup.entry_orders_placed || InpOrderVolume <= 0.0)
       return(setup.entry_orders_placed);
 
@@ -277,6 +300,11 @@ bool SignalSetupManager_PlaceEntryOrders(SignalSetup &setup)
    filtered_plan.comment = plan.comment;
    for(int index = 0; index < plan.count; index++)
    {
+      // An E4-triggered flip enters on SELL pullbacks. Its own SELL BO has
+      // not broken and is not an entry level for this route.
+      if(setup.breakout_type == SETUP_BREAKOUT_E4 && plan.entries[index].price == setup.levels.bo)
+         continue;
+
       if(!SignalSetupManager_IsRecoveredLevelTouched(setup, plan.entries[index].price))
          PendingOrderPlanner_Add(filtered_plan, plan.entries[index].type, plan.entries[index].price, plan.entries[index].take_profit);
    }
@@ -316,12 +344,160 @@ bool SignalSetupManager_PlaceEntryOrders(SignalSetup &setup)
    return(true);
 }
 
+bool SignalSetupManager_PlaceBreakoutStopOrders(SignalSetup &setup)
+{
+   if(!InpEnableFiboBreakoutStops ||
+      setup.breakout_stop_placement_attempted ||
+      InpOrderVolume <= 0.0)
+      return(false);
+
+   // Do not let the signal candle itself activate either breakout stop.
+   datetime current_candle_time = iTime(setup.symbol, PERIOD_M1, 0);
+   if(current_candle_time == 0 || current_candle_time <= setup.candle.time)
+      return(false);
+
+   if(current_candle_time > setup.candle.time + PeriodSeconds(PERIOD_M1))
+   {
+      setup.breakout_stop_placement_attempted = true;
+      PrintFormat(
+         "[MT5-AI] Breakout stops not armed for stale signal: %s (signal=%s)",
+         setup.object_name,
+         TimeToString(setup.candle.time, TIME_DATE | TIME_MINUTES)
+      );
+      return(false);
+   }
+
+   setup.breakout_stop_placement_attempted = true;
+
+   PendingOrderPlan plan;
+   if(!PendingOrderPlanner_CreateBreakoutStopPlan(setup.levels, plan))
+      return(false);
+
+   plan.symbol = setup.symbol;
+   plan.volume = InpOrderVolume;
+   plan.magic_number = InpMagicNumber;
+   plan.comment = SignalSetupManager_BreakoutStopOrderComment(setup);
+
+   TradeExecutionResult execution;
+   if(!TradeExecutor_Execute(plan, execution))
+      return(false);
+
+   for(int index = 0; index < execution.count; index++)
+   {
+      if(execution.results[index].status == EXECUTION_STATUS_PLACED)
+      {
+         if(plan.entries[index].type == PENDING_ORDER_BUY_STOP)
+            setup.breakout_buy_stop_ticket = execution.results[index].ticket;
+         else if(plan.entries[index].type == PENDING_ORDER_SELL_STOP)
+            setup.breakout_sell_stop_ticket = execution.results[index].ticket;
+
+         continue;
+      }
+
+      PrintFormat(
+         "[MT5-AI] Breakout stop rejected: %s type=%d price=%G retcode=%u",
+         setup.object_name,
+         plan.entries[index].type,
+         plan.entries[index].price,
+         execution.results[index].retcode
+      );
+   }
+
+   if(setup.breakout_buy_stop_ticket == 0 || setup.breakout_sell_stop_ticket == 0)
+   {
+      TradeExecutor_CancelPendingOrder(setup.breakout_buy_stop_ticket);
+      TradeExecutor_CancelPendingOrder(setup.breakout_sell_stop_ticket);
+      setup.breakout_buy_stop_ticket = 0;
+      setup.breakout_sell_stop_ticket = 0;
+      PrintFormat("[MT5-AI] Breakout-stop pair was not armed: %s", setup.object_name);
+      return(false);
+   }
+
+   setup.breakout_stop_orders_placed = true;
+   PrintFormat(
+      "[MT5-AI] Breakout stops armed: %s (BUY STOP=%G, SELL STOP=%G; manual TP/SL)",
+      setup.object_name,
+      setup.levels.bo,
+      setup.levels.e4
+   );
+   return(true);
+}
+
+bool SignalSetupManager_FlipBreakoutStopSetupToSell(SignalSetup &setup)
+{
+   FibonacciLevels sell_levels;
+   string sell_object_name = setup.object_name + "_SELL";
+   if(!Fibonacci_Calculate(setup.candle, SIGNAL_DIRECTION_SELL, sell_levels) ||
+      !ChartDrawer_RemoveFibonacci(setup.object_name) ||
+      !ChartDrawer_DrawFibonacci(sell_object_name, setup.candle, SIGNAL_DIRECTION_SELL))
+   {
+      PrintFormat("[MT5-AI] Could not flip breakout-stop Fibonacci: %s", setup.object_name);
+      return(false);
+   }
+
+   setup.levels = sell_levels;
+   setup.direction = SIGNAL_DIRECTION_SELL;
+   setup.object_name = sell_object_name;
+   return(true);
+}
+
+void SignalSetupManager_HandleBreakoutStopTrigger(SignalSetup &setup, const ulong order_ticket)
+{
+   if(!InpEnableFiboBreakoutStops ||
+      !setup.breakout_stop_orders_placed ||
+      setup.breakout_stop_triggered)
+      return;
+
+   bool buy_stop_triggered = order_ticket == setup.breakout_buy_stop_ticket;
+   bool sell_stop_triggered = order_ticket == setup.breakout_sell_stop_ticket;
+   if(!buy_stop_triggered && !sell_stop_triggered)
+      return;
+
+   setup.breakout_stop_triggered = true;
+   setup.breakout_detected = true;
+   setup.breakout_candle_time = iTime(setup.symbol, PERIOD_M1, 0);
+
+   ulong opposite_ticket = buy_stop_triggered ?
+                           setup.breakout_sell_stop_ticket : setup.breakout_buy_stop_ticket;
+   if(!TradeExecutor_CancelPendingOrder(opposite_ticket))
+      PrintFormat("[MT5-AI] Could not cancel opposite breakout stop: ticket=%I64u", opposite_ticket);
+
+   if(buy_stop_triggered)
+   {
+      setup.breakout_type = SETUP_BREAKOUT_BO;
+      PrintFormat("[MT5-AI] BUY STOP triggered; SELL STOP cancelled: %s", setup.object_name);
+      return;
+   }
+
+   setup.breakout_type = SETUP_BREAKOUT_E4;
+   if(SignalSetupManager_FlipBreakoutStopSetupToSell(setup))
+      PrintFormat("[MT5-AI] SELL STOP triggered; BUY STOP cancelled and Fibonacci flipped: %s", setup.object_name);
+}
+
 void SignalSetupManager_OnTradeTransaction(const MqlTradeTransaction &transaction)
 {
    if(transaction.type != TRADE_TRANSACTION_DEAL_ADD || transaction.deal == 0)
       return;
 
    ulong order_ticket = (ulong)HistoryDealGetInteger(transaction.deal, DEAL_ORDER);
+   ENUM_DEAL_ENTRY deal_entry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(transaction.deal, DEAL_ENTRY);
+   if(order_ticket == 0 ||
+      (deal_entry != DEAL_ENTRY_IN && deal_entry != DEAL_ENTRY_INOUT))
+      return;
+
+   if(InpEnableFiboBreakoutStops)
+   {
+      for(int setup_index = 0; setup_index < MAX_ACTIVE_SIGNAL_SETUPS; setup_index++)
+      {
+         if(order_ticket != g_signal_setups[setup_index].breakout_buy_stop_ticket &&
+            order_ticket != g_signal_setups[setup_index].breakout_sell_stop_ticket)
+            continue;
+
+         SignalSetupManager_HandleBreakoutStopTrigger(g_signal_setups[setup_index], order_ticket);
+         return;
+      }
+   }
+
    ulong position_id = (ulong)HistoryDealGetInteger(transaction.deal, DEAL_POSITION_ID);
    if(order_ticket == 0 || position_id == 0)
       return;
@@ -496,105 +672,159 @@ void SignalSetupManager_MonitorSetup(SignalSetup &setup)
       return;
 
    SignalSetupManager_MonitorFallbackExits(setup);
-
-   datetime current_candle_time = iTime(setup.symbol, PERIOD_M1, 0);
-   if(current_candle_time == 0)
+   if(setup.completed)
       return;
 
-   // The signal candle defines the Fibonacci. It is never a completion event.
-   // Validation starts only after a later candle breaks BO or E4.
-   if(!setup.breakout_detected)
+   if(InpEnableFiboBreakoutStops)
    {
-      datetime closed_candle_time = iTime(setup.symbol, PERIOD_M1, 1);
-      if(closed_candle_time == 0 || closed_candle_time <= setup.candle.time)
-         return;
+      SignalSetupManager_PlaceBreakoutStopOrders(setup);
+      return;
+   }
 
-      double closed_high = iHigh(setup.symbol, PERIOD_M1, 1);
-      double closed_low = iLow(setup.symbol, PERIOD_M1, 1);
-      if(closed_high <= 0.0 || closed_low <= 0.0)
-         return;
+   if(!InpEnableAutoTrade)
+      return;
 
-      bool bo_broken = setup.direction == SIGNAL_DIRECTION_BUY ?
-                        closed_high >= setup.levels.bo : closed_low <= setup.levels.bo;
-      bool e4_broken = setup.direction == SIGNAL_DIRECTION_BUY ?
-                        closed_low <= setup.levels.e4 : closed_high >= setup.levels.e4;
+   datetime last_closed_candle_time = iTime(setup.symbol, PERIOD_M1, 1);
+   if(last_closed_candle_time == 0 ||
+      last_closed_candle_time <= setup.last_evaluated_candle_time)
+      return;
 
-      if(bo_broken)
+   MqlRates closed_candles[];
+   int copied = CopyRates(
+      setup.symbol,
+      PERIOD_M1,
+      setup.last_evaluated_candle_time + PeriodSeconds(PERIOD_M1),
+      last_closed_candle_time,
+      closed_candles
+   );
+   if(copied <= 0)
+      return;
+
+   // Process every missed closed candle chronologically. This preserves the
+   // first valid route after the signal: BO wins if it occurred before E4.
+   for(int index = 0; index < copied; index++)
+   {
+      datetime closed_candle_time = closed_candles[index].time;
+      if(closed_candle_time <= setup.last_evaluated_candle_time ||
+         closed_candle_time <= setup.candle.time)
+         continue;
+
+      double closed_high = closed_candles[index].high;
+      double closed_low = closed_candles[index].low;
+      double closed_price = closed_candles[index].close;
+      if(closed_high <= 0.0 || closed_low <= 0.0 || closed_price <= 0.0)
+         continue;
+
+      setup.last_evaluated_candle_time = closed_candle_time;
+
+      // The signal candle defines the Fibonacci. It is never a breakout or
+      // completion event. Only later, fully closed candles reach this point.
+      if(!setup.breakout_detected)
       {
-         setup.breakout_detected = true;
-         setup.breakout_type = SETUP_BREAKOUT_BO;
-         setup.breakout_candle_time = closed_candle_time;
-         PrintFormat("[MT5-AI] Setup breakout: %s (BO)", setup.object_name);
-         SignalSetupManager_PlaceEntryOrders(setup);
-      }
-      else if(e4_broken && setup.direction == SIGNAL_DIRECTION_BUY)
-      {
-         FibonacciLevels sell_levels;
-         string sell_object_name = setup.object_name + "_SELL";
-         if(Fibonacci_Calculate(setup.candle, SIGNAL_DIRECTION_SELL, sell_levels) &&
-            ChartDrawer_RemoveFibonacci(setup.object_name) &&
-            ChartDrawer_DrawFibonacci(sell_object_name, setup.candle, SIGNAL_DIRECTION_SELL))
+         // Route selection is close-confirmed: a wick through BO or E4 does
+         // not place orders or flip the Fibonacci.
+         bool bo_broken = setup.direction == SIGNAL_DIRECTION_BUY ?
+                           closed_price >= setup.levels.bo : closed_price <= setup.levels.bo;
+         bool e4_broken = setup.direction == SIGNAL_DIRECTION_BUY ?
+                           closed_price <= setup.levels.e4 : closed_price >= setup.levels.e4;
+
+         if(bo_broken)
          {
-            setup.levels = sell_levels;
-            setup.direction = SIGNAL_DIRECTION_SELL;
-            setup.object_name = sell_object_name;
             setup.breakout_detected = true;
-            setup.breakout_type = SETUP_BREAKOUT_E4;
+            setup.breakout_type = SETUP_BREAKOUT_BO;
             setup.breakout_candle_time = closed_candle_time;
-            PrintFormat("[MT5-AI] BUY Fibonacci flipped to SELL: %s", setup.object_name);
+            PrintFormat(
+               "[MT5-AI] Setup breakout: %s (BO close; candle=%s high=%G low=%G close=%G BO=%G)",
+               setup.object_name,
+               TimeToString(closed_candle_time, TIME_DATE | TIME_MINUTES),
+               closed_high,
+               closed_low,
+               closed_price,
+               setup.levels.bo
+            );
             SignalSetupManager_PlaceEntryOrders(setup);
+            return;
          }
+
+         if(e4_broken && setup.direction == SIGNAL_DIRECTION_BUY)
+         {
+            FibonacciLevels sell_levels;
+            string sell_object_name = setup.object_name + "_SELL";
+            if(Fibonacci_Calculate(setup.candle, SIGNAL_DIRECTION_SELL, sell_levels) &&
+               ChartDrawer_RemoveFibonacci(setup.object_name) &&
+               ChartDrawer_DrawFibonacci(sell_object_name, setup.candle, SIGNAL_DIRECTION_SELL))
+            {
+               setup.levels = sell_levels;
+               setup.direction = SIGNAL_DIRECTION_SELL;
+               setup.object_name = sell_object_name;
+               setup.breakout_detected = true;
+               setup.breakout_type = SETUP_BREAKOUT_E4;
+               setup.breakout_candle_time = closed_candle_time;
+               PrintFormat(
+                  "[MT5-AI] BUY Fibonacci flipped to SELL: %s (E4 close; candle=%s high=%G low=%G close=%G BUY E4=%G)",
+                  setup.object_name,
+                  TimeToString(closed_candle_time, TIME_DATE | TIME_MINUTES),
+                  closed_high,
+                  closed_low,
+                  closed_price,
+                  setup.candle.high + ((setup.candle.high - setup.candle.low) * FIBONACCI_RATIO_E4)
+               );
+               SignalSetupManager_PlaceEntryOrders(setup);
+            }
+
+            return;
+         }
+
+         continue;
       }
 
-      return;
+      // Do not complete a setup on the same M1 candle that produced the breakout.
+      if(closed_candle_time <= setup.breakout_candle_time)
+         continue;
+
+      bool entry_level_touched = setup.direction == SIGNAL_DIRECTION_BUY ?
+                                 closed_low <= setup.levels.e3 : closed_high >= setup.levels.e3;
+      bool e4_level_touched = setup.direction == SIGNAL_DIRECTION_BUY ?
+                              closed_low <= setup.levels.e4 : closed_high >= setup.levels.e4;
+      bool e5_level_touched = setup.direction == SIGNAL_DIRECTION_BUY ?
+                              closed_low <= setup.levels.e5 : closed_high >= setup.levels.e5;
+
+      // A BO breakout is committed to the BO -> VOID route. Pullback rules do
+      // not apply to that setup unless it first breaks E4 instead.
+      if(setup.breakout_type == SETUP_BREAKOUT_BO)
+      {
+         if(SignalSetupManager_IsAtOrAbove(setup, setup.direction == SIGNAL_DIRECTION_BUY ? closed_high : closed_low, setup.levels.void_level))
+            SignalSetupManager_Complete(setup, SETUP_COMPLETION_BO_TO_VOID);
+
+         if(setup.completed)
+            return;
+
+         continue;
+      }
+
+      if(entry_level_touched)
+         setup.e3_visited = true;
+
+      if(e4_level_touched)
+         setup.e4_visited = true;
+
+      if(e5_level_touched)
+      {
+         setup.e5_visited = true;
+         SignalSetupManager_MoveE4TargetToE3(setup);
+      }
+
+      double target_price = setup.direction == SIGNAL_DIRECTION_BUY ? closed_high : closed_low;
+      if(setup.e5_visited && SignalSetupManager_IsAtOrAbove(setup, target_price, setup.levels.e3))
+         SignalSetupManager_Complete(setup, SETUP_COMPLETION_E5_TO_E3);
+      else if(setup.e4_visited && SignalSetupManager_IsAtOrAbove(setup, target_price, setup.levels.tp_e4_e7))
+         SignalSetupManager_Complete(setup, SETUP_COMPLETION_E4_TO_TP_E4_E7);
+      else if(setup.e3_visited && SignalSetupManager_IsAtOrAbove(setup, target_price, setup.levels.tp))
+         SignalSetupManager_Complete(setup, SETUP_COMPLETION_E3_TO_TP);
+
+      if(setup.completed)
+         return;
    }
-
-   // Do not complete a setup on the same M1 candle that produced the breakout.
-   datetime closed_candle_time = iTime(setup.symbol, PERIOD_M1, 1);
-   if(closed_candle_time == 0 || closed_candle_time <= setup.breakout_candle_time)
-      return;
-
-   double closed_high = iHigh(setup.symbol, PERIOD_M1, 1);
-   double closed_low = iLow(setup.symbol, PERIOD_M1, 1);
-   if(closed_high <= 0.0 || closed_low <= 0.0)
-      return;
-
-   bool entry_level_touched = setup.direction == SIGNAL_DIRECTION_BUY ?
-                              closed_low <= setup.levels.e3 : closed_high >= setup.levels.e3;
-   bool e4_level_touched = setup.direction == SIGNAL_DIRECTION_BUY ?
-                           closed_low <= setup.levels.e4 : closed_high >= setup.levels.e4;
-   bool e5_level_touched = setup.direction == SIGNAL_DIRECTION_BUY ?
-                           closed_low <= setup.levels.e5 : closed_high >= setup.levels.e5;
-
-   // A BO breakout is committed to the BO -> VOID route. Pullback rules do
-   // not apply to that setup unless it first breaks E4 instead.
-   if(setup.breakout_type == SETUP_BREAKOUT_BO)
-   {
-      if(SignalSetupManager_IsAtOrAbove(setup, setup.direction == SIGNAL_DIRECTION_BUY ? closed_high : closed_low, setup.levels.void_level))
-         SignalSetupManager_Complete(setup, SETUP_COMPLETION_BO_TO_VOID);
-
-      return;
-   }
-
-   if(entry_level_touched)
-      setup.e3_visited = true;
-
-   if(e4_level_touched)
-      setup.e4_visited = true;
-
-   if(e5_level_touched)
-   {
-      setup.e5_visited = true;
-      SignalSetupManager_MoveE4TargetToE3(setup);
-   }
-
-   double target_price = setup.direction == SIGNAL_DIRECTION_BUY ? closed_high : closed_low;
-   if(setup.e5_visited && SignalSetupManager_IsAtOrAbove(setup, target_price, setup.levels.e3))
-      SignalSetupManager_Complete(setup, SETUP_COMPLETION_E5_TO_E3);
-   else if(setup.e4_visited && SignalSetupManager_IsAtOrAbove(setup, target_price, setup.levels.tp_e4_e7))
-      SignalSetupManager_Complete(setup, SETUP_COMPLETION_E4_TO_TP_E4_E7);
-   else if(setup.e3_visited && SignalSetupManager_IsAtOrAbove(setup, target_price, setup.levels.tp))
-      SignalSetupManager_Complete(setup, SETUP_COMPLETION_E3_TO_TP);
 }
 
 void SignalSetupManager_MonitorAll()

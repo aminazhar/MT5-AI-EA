@@ -105,7 +105,7 @@ bool PendingOrderPlanner_Create(
       }
 
       return(
-         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.bo, levels.void_level) &&
+         PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_STOP, levels.bo, levels.void_level) &&
          PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e3, levels.tp) &&
          PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e4, levels.tp_e4_e7) &&
          PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e5, levels.e3) &&
@@ -138,6 +138,21 @@ bool PendingOrderPlanner_Create(
       PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e8, levels.e3) &&
       PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e9, levels.e3) &&
       PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_LIMIT, levels.e10, levels.e3)
+   );
+}
+
+// Breakout-stop mode is intentionally limited to the two opposing stops.
+// TP and SL remain empty so the trader can manage the filled position manually.
+bool PendingOrderPlanner_CreateBreakoutStopPlan(
+   const FibonacciLevels &levels,
+   PendingOrderPlan &plan
+)
+{
+   PendingOrderPlanner_Reset(plan);
+
+   return(
+      PendingOrderPlanner_Add(plan, PENDING_ORDER_BUY_STOP, levels.bo, 0.0) &&
+      PendingOrderPlanner_Add(plan, PENDING_ORDER_SELL_STOP, levels.e4, 0.0)
    );
 }
 

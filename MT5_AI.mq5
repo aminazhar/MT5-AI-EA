@@ -37,9 +37,22 @@ void NotifyRangeClassification(const RangeClassification classification, const d
 
 int OnInit()
 {
+   if(InpEnableFiboBreakoutStops && InpEnableAutoTrade)
+   {
+      string message = "[MT5-AI] Enable either Fibo Breakout Stops or EA Auto Trade, not both.";
+      Print(message);
+      Alert(message);
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+
    SignalSetupManager_Initialize();
    EventSetTimer(TIMER_INTERVAL_SECONDS);
-   Print("[MT5-AI] EA-13 multi-signal Fibonacci manager initialized (visual-only)");
+   if(InpEnableFiboBreakoutStops)
+      Print("[MT5-AI] Fibonacci breakout-stop mode initialized (manual TP/SL)");
+   else if(InpEnableAutoTrade)
+      Print("[MT5-AI] EA auto-trade mode initialized");
+   else
+      Print("[MT5-AI] Visual-only Fibonacci mode initialized");
 
    return(INIT_SUCCEEDED);
 }
@@ -113,12 +126,16 @@ bool PrepareNewSignal(const Signal &signal)
 
    PrintFormat("[MT5-AI] Range: Points=%.0f", range_points);
 
-   datetime recovered_breakout_time;
-   HistoricalRecoveryState recovery = SignalSetupManager_ScanBuyHistory(signal.symbol, signal.timestamp, levels, recovered_breakout_time);
-   if(recovery == HISTORICAL_RECOVERY_COMPLETED)
+   datetime recovered_breakout_time = 0;
+   HistoricalRecoveryState recovery = HISTORICAL_RECOVERY_NONE;
+   if(InpEnableAutoTrade)
    {
-      Print("[MT5-AI] Historical recovery: BO->VOID already completed; Fibonacci not redrawn");
-      return(true);
+      recovery = SignalSetupManager_ScanBuyHistory(signal.symbol, signal.timestamp, levels, recovered_breakout_time);
+      if(recovery == HISTORICAL_RECOVERY_COMPLETED)
+      {
+         Print("[MT5-AI] Historical recovery: BO->VOID already completed; Fibonacci not redrawn");
+         return(true);
+      }
    }
 
    string signal_key = SignalKey(signal);
@@ -142,7 +159,7 @@ bool PrepareNewSignal(const Signal &signal)
       return(false);
    }
 
-   if(recovery == HISTORICAL_RECOVERY_BO_ACTIVE)
+   if(InpEnableAutoTrade && recovery == HISTORICAL_RECOVERY_BO_ACTIVE)
    {
       int setup_index = SignalSetupManager_Find(signal.symbol, signal.timestamp);
       if(setup_index >= 0)
@@ -152,12 +169,20 @@ bool PrepareNewSignal(const Signal &signal)
          g_signal_setups[setup_index].breakout_candle_time = recovered_breakout_time;
          g_signal_setups[setup_index].recovered_from_history = true;
          SignalSetupManager_MarkRecoveryTouchedLevels(g_signal_setups[setup_index], g_signal_setups[setup_index].breakout_candle_time);
+         // Historical recovery has already evaluated all closed candles up to
+         // this point. Continue with the next newly closed candle only.
+         g_signal_setups[setup_index].last_evaluated_candle_time = iTime(signal.symbol, PERIOD_M1, 1);
          SignalSetupManager_PlaceEntryOrders(g_signal_setups[setup_index]);
          Print("[MT5-AI] Historical recovery: BO breakout restored; pullback orders placed");
       }
    }
 
-   Print("[MT5-AI] Initial BUY Fibonacci drawn; execution remains disabled");
+   if(InpEnableFiboBreakoutStops)
+      Print("[MT5-AI] Initial BUY Fibonacci drawn; BO/E4 stop pair will arm after the signal candle");
+   else if(InpEnableAutoTrade)
+      Print("[MT5-AI] Initial BUY Fibonacci drawn; waiting for close-confirmed BO or E4 route");
+   else
+      Print("[MT5-AI] Initial BUY Fibonacci drawn; trading is disabled");
    return(true);
 }
 
