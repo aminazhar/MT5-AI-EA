@@ -10,14 +10,17 @@
 #include "include/SignalVerification.mqh"
 #include "include/ChartDrawer.mqh"
 #include "include/RangeFilter.mqh"
+#include "include/SheetLogWriter.mqh"
 #include "include/MultiSignalFibonacciManager.mqh"
 #include "include/Utils.mqh"
 
 string g_last_range_rejected_signal_key = "";
+string g_last_sheet_logged_signal_key = "";
 
 string SignalKey(const Signal &signal)
 {
-   return(signal.symbol + "_" + IntegerToString((long)signal.timestamp));
+   string signal_type = SignalReader_IsNQ426(signal) ? "NQ426" : "Normal";
+   return(signal.symbol + "_" + IntegerToString((long)signal.timestamp) + "_" + signal_type);
 }
 
 void NotifyRangeClassification(const RangeClassification classification, const double range_points)
@@ -86,8 +89,71 @@ void PrintFibonacci(const FibonacciLevels &levels)
    );
 }
 
+bool PrepareSheetOnlySignal(const Signal &signal)
+{
+   if(SignalReader_IsNQ426(signal))
+      return(false);
+
+   if(!SignalReader_IsSupportedSymbol(signal))
+   {
+      PrintFormat("[MT5-AI] Sheet-only signal ignored: unsupported symbol %s", signal.symbol);
+      return(true);
+   }
+
+   string signal_key = SignalKey(signal);
+   if(g_last_sheet_logged_signal_key == signal_key)
+      return(true);
+
+   PrintFormat(
+      "[MT5-AI] Normal signal (sheet-only): Symbol=%s Time=%s",
+      signal.symbol,
+      TimeToString(signal.timestamp, TIME_DATE | TIME_SECONDS)
+   );
+
+   Candle candle;
+   if(!CandleFinder_FindM1(signal.symbol, signal.timestamp, candle))
+   {
+      Print("[MT5-AI] Normal signal M1 candle not found");
+      return(false);
+   }
+
+   FibonacciLevels levels;
+   if(!Fibonacci_Calculate(candle, SIGNAL_DIRECTION_BUY, levels))
+   {
+      Print("[MT5-AI] Normal signal Fibonacci calculation failed");
+      return(false);
+   }
+
+   double range_points;
+   RangeClassification classification;
+   if(!RangeFilter_Classify(levels, signal.symbol, range_points, classification))
+   {
+      Print("[MT5-AI] Normal signal range classification failed");
+      return(false);
+   }
+
+   if(!SheetLogWriter_Append(signal, candle, range_points))
+   {
+      Print("[MT5-AI] Normal signal sheet-log queue write failed");
+      return(false);
+   }
+
+   g_last_sheet_logged_signal_key = signal_key;
+   PrintFormat("[MT5-AI] Normal signal sheet log queued: Points=%.0f", range_points);
+   return(true);
+}
+
 bool PrepareNewSignal(const Signal &signal)
 {
+   if(!SignalReader_IsSupportedSymbol(signal))
+   {
+      PrintFormat("[MT5-AI] Signal ignored: unsupported symbol %s", signal.symbol);
+      return(true);
+   }
+
+   if(!SignalReader_IsNQ426(signal))
+      return(PrepareSheetOnlySignal(signal));
+
    if(SignalSetupManager_Find(signal.symbol, signal.timestamp) >= 0)
       return(true);
 
@@ -126,6 +192,26 @@ bool PrepareNewSignal(const Signal &signal)
 
    PrintFormat("[MT5-AI] Range: Points=%.0f", range_points);
 
+   string signal_key = SignalKey(signal);
+   if(g_last_sheet_logged_signal_key != signal_key)
+   {
+      if(!SheetLogWriter_Append(signal, candle, range_points))
+      {
+         Print("[MT5-AI] Sheet-log queue write failed");
+      }
+      else
+      {
+         g_last_sheet_logged_signal_key = signal_key;
+         PrintFormat(
+            "[MT5-AI] Sheet log queued: High=%I64d Low=%I64d Difference=%I64d Points=%.0f",
+            (long)MathFloor(candle.high),
+            (long)MathFloor(candle.low),
+            (long)MathFloor(candle.high) - (long)MathFloor(candle.low),
+            range_points
+         );
+      }
+   }
+
    datetime recovered_breakout_time = 0;
    HistoricalRecoveryState recovery = HISTORICAL_RECOVERY_NONE;
    if(InpEnableAutoTrade)
@@ -138,7 +224,6 @@ bool PrepareNewSignal(const Signal &signal)
       }
    }
 
-   string signal_key = SignalKey(signal);
    if(classification == RANGE_CLASSIFICATION_REJECT)
    {
       // signal.json remains unchanged after rejection, so alert only once per signal.
@@ -192,6 +277,10 @@ void OnTimer()
 
    if(SignalReader_Read(signal))
       PrepareNewSignal(signal);
+
+   Signal sheet_only_signal;
+   if(SignalReader_ReadFromFile(SHEET_ONLY_SIGNAL_FILE, sheet_only_signal))
+      PrepareSheetOnlySignal(sheet_only_signal);
 
    SignalSetupManager_MonitorAll();
 }

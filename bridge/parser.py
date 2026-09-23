@@ -21,14 +21,11 @@ TIMESTAMP_PATTERN: Final[re.Pattern[str]] = re.compile(
 )
 
 TIMESTAMP_FORMAT: Final[str] = "%Y.%m.%d %H:%M"
+SUPPORTED_SYMBOL: Final[str] = "FixedVol100"
 
 
 def parse_signal(message: str) -> Signal | None:
     if not isinstance(message, str):
-        return None
-
-    # Accept only NQ426 signals
-    if not INDICATOR_PATTERN.search(message):
         return None
 
     symbol_match = SYMBOL_PATTERN.search(message)
@@ -40,7 +37,7 @@ def parse_signal(message: str) -> Signal | None:
     # Telegram messages end the symbol line with sentence punctuation.
     # That punctuation is not part of the MT5 symbol name.
     symbol = symbol_match.group("symbol").strip().rstrip(".,;:!?")
-    if not symbol:
+    if symbol.casefold() != SUPPORTED_SYMBOL.casefold():
         return None
 
     try:
@@ -52,6 +49,7 @@ def parse_signal(message: str) -> Signal | None:
         return None
 
     return Signal(
-        symbol=symbol,
+        symbol=SUPPORTED_SYMBOL,
         timestamp=timestamp,
+        signal_type="NQ426" if INDICATOR_PATTERN.search(message) else "Normal",
     )

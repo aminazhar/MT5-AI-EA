@@ -3,6 +3,8 @@
 
 #include "Config.mqh"
 
+#define SUPPORTED_SIGNAL_SYMBOL "FixedVol100"
+
 enum SignalDirection
 {
    SIGNAL_DIRECTION_UNKNOWN = 0,
@@ -14,7 +16,18 @@ struct Signal
 {
    string   symbol;
    datetime timestamp;
+   string   signal_type;
 };
+
+bool SignalReader_IsNQ426(const Signal &signal)
+{
+   return(signal.signal_type == "NQ426");
+}
+
+bool SignalReader_IsSupportedSymbol(const Signal &signal)
+{
+   return(signal.symbol == SUPPORTED_SIGNAL_SYMBOL);
+}
 
 bool SignalReader_IsWhitespace(const ushort character)
 {
@@ -63,13 +76,14 @@ void SignalReader_Reset(Signal &signal)
 {
    signal.symbol = "";
    signal.timestamp = 0;
+   signal.signal_type = "";
 }
 
-bool SignalReader_Read(Signal &signal)
+bool SignalReader_ReadFromFile(const string file_name, Signal &signal)
 {
    SignalReader_Reset(signal);
 
-   int file_handle = FileOpen(SIGNAL_FILE, FILE_READ | FILE_TXT | FILE_ANSI);
+   int file_handle = FileOpen(file_name, FILE_READ | FILE_TXT | FILE_ANSI);
    if(file_handle == INVALID_HANDLE)
       return(false);
 
@@ -82,10 +96,15 @@ bool SignalReader_Read(Signal &signal)
 
    string symbol;
    string timestamp_text;
+   string signal_type = "NQ426";
 
    if(!SignalReader_ExtractString(json, "symbol", symbol) ||
       !SignalReader_ExtractString(json, "timestamp", timestamp_text))
       return(false);
+
+   string parsed_signal_type;
+   if(SignalReader_ExtractString(json, "signal_type", parsed_signal_type))
+      signal_type = parsed_signal_type;
 
    datetime timestamp = StringToTime(timestamp_text);
 
@@ -94,8 +113,14 @@ bool SignalReader_Read(Signal &signal)
 
    signal.symbol = symbol;
    signal.timestamp = timestamp;
+   signal.signal_type = signal_type;
 
    return(true);
+}
+
+bool SignalReader_Read(Signal &signal)
+{
+   return(SignalReader_ReadFromFile(SIGNAL_FILE, signal));
 }
 
 #endif

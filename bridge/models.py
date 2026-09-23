@@ -6,3 +6,4 @@ from datetime import datetime
 class Signal:
     symbol: str
     timestamp: datetime
+    signal_type: str

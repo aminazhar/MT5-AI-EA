@@ -1,6 +1,6 @@
 # Bridge Telegram Listener, Parser, and Signal Writer
 
-This bridge connects to one Telegram channel, prints each new message, parses supported signals, and writes valid signals to `signal.json`. It does not communicate with MetaTrader 5 directly.
+This bridge connects to one Telegram channel, prints each new message, classifies valid signals as `NQ426` or `Normal`, and writes a local handoff file. It does not communicate with MetaTrader 5 directly.
 
 ## Prerequisites
 
@@ -66,3 +66,37 @@ python main.py
 ```
 
 Press `Ctrl+C` to stop the listener gracefully.
+
+## Google Sheets candle logger
+
+The EA queues one integer-only record for each valid signal candle. The bridge
+appends it to the next empty row of the configured worksheet:
+
+```text
+Column A: Date         (for example, 19 Sep)
+Column B: Signal Type  (`NQ426` or `Normal`)
+Column C: Time         (for example, 19:13)
+Column D: High         (decimal portion removed)
+Column E: Low          (decimal portion removed)
+Column G: Points       (E3-to-E5 distance in symbol points)
+Column H: Decision     (`Trap`, `Safe`, or `Caution`)
+```
+
+Columns F and I are not modified, so existing `Differences` and `Deeper Level`
+formulas in the sheet continue to calculate normally.
+
+To enable uploads, create a Google Cloud service account, enable the Google
+Sheets API, then share the target sheet with the service-account email as an
+Editor. Add these local-only values to `.env`:
+
+```env
+GOOGLE_SERVICE_ACCOUNT_FILE=C:\Users\<username>\Documents\google-service-account.json
+GOOGLE_SHEET_ID=1ePcGAytolZYXUnURjmeVhozx8ft424ljHYoS2rFJZhw
+GOOGLE_SHEET_WORKSHEET_ID=0
+```
+
+Install the new dependencies before starting the bridge:
+
+```bash
+pip install -r requirements.txt
+```

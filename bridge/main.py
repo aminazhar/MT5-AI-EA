@@ -6,7 +6,8 @@ from telethon import TelegramClient, events
 from config import ConfigurationError, Settings, load_settings
 from models import Signal
 from parser import parse_signal
-from writer import write_signal
+from sheet_logger import run_sheet_logger
+from writer import sheet_only_signal_path, write_sheet_only_signal, write_signal
 
 
 SESSION_NAME = "telegram_listener"
@@ -42,11 +43,12 @@ def print_signal(signal: Signal | None) -> None:
     print("----------------------------------------")
 
     if signal is None:
-        print("Message ignored: not NQ426 / invalid signal")
+        print("Message ignored: invalid signal")
         print("----------------------------------------")
         return
 
-    print("Valid NQ426 signal detected")
+    print("Valid signal detected")
+    print(f"Type      : {signal.signal_type}")
     print(f"Symbol    : {signal.symbol}")
     print(f"Timestamp : {signal.timestamp:%Y-%m-%d %H:%M:%S}")
     print("----------------------------------------")
@@ -79,8 +81,14 @@ async def listen(settings: Settings) -> None:
                 print_signal(signal)
 
                 if signal is not None:
-                    write_successful = write_signal(signal, settings.signal_output_path)
-                    print_write_result(settings.signal_output_path, write_successful)
+                    if signal.signal_type == "NQ426":
+                        output_path = settings.signal_output_path
+                        write_successful = write_signal(signal, output_path)
+                    else:
+                        output_path = sheet_only_signal_path(settings.signal_output_path)
+                        write_successful = write_sheet_only_signal(signal, settings.signal_output_path)
+
+                    print_write_result(output_path, write_successful)
 
                 print()
 
@@ -100,10 +108,27 @@ async def listen(settings: Settings) -> None:
         await asyncio.sleep(RECONNECT_DELAY_SECONDS)
 
 
+async def run(settings: Settings) -> None:
+    sheet_logger_task: asyncio.Task[None] | None = None
+    if settings.sheet_logger is not None:
+        sheet_logger_task = asyncio.create_task(
+            run_sheet_logger(settings.signal_output_path, settings.sheet_logger)
+        )
+    else:
+        print("Google Sheets logger disabled: Google Sheets settings are not configured.")
+
+    try:
+        await listen(settings)
+    finally:
+        if sheet_logger_task is not None:
+            sheet_logger_task.cancel()
+            await asyncio.gather(sheet_logger_task, return_exceptions=True)
+
+
 def main() -> None:
     try:
         settings = load_settings()
-        asyncio.run(listen(settings))
+        asyncio.run(run(settings))
     except ConfigurationError as error:
         print(f"Configuration error: {error}")
     except KeyboardInterrupt:
